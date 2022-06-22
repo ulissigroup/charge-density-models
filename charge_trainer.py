@@ -1,10 +1,3 @@
-"""
-Copyright (c) Facebook, Inc. and its affiliates.
-
-This source code is licensed under the MIT license found in the
-LICENSE file in the root directory of this source tree.
-"""
-
 import logging
 import os
 from collections import defaultdict
@@ -19,11 +12,22 @@ from ocpmodels.common.registry import registry
 from ocpmodels.modules.normalizer import Normalizer
 from ocpmodels.trainers.base_trainer import BaseTrainer
 
+from ocpmodels.common.data_parallel import (
+    BalancedBatchSampler,
+    OCPDataParallel,
+    ParallelCollater,
+)
 
-@registry.register_trainer("energy")
-class EnergyTrainer(BaseTrainer):
+from ocpmodels.modules.loss import AtomwiseL2Loss, DDPLoss, L2MAELoss
+from ocpmodels.modules.evaluator import *
+from chg_utils import batch_to_deepDFT_dict
+
+import pdb
+
+@registry.register_trainer("charge")
+class ChargeTrainer(BaseTrainer):
     """
-    Trainer class for the Initial Structure to Relaxed Energy (IS2RE) task.
+    Trainer class for charge density prediction task.
 
     .. note::
 
@@ -77,7 +81,11 @@ class EnergyTrainer(BaseTrainer):
         cpu=False,
         slurm={},
         noddp=False,
+        name=None,
+        cutoff = 5,
+        num_probes = 1000,
     ):
+ 
         super().__init__(
             task=task,
             model=model,
@@ -95,10 +103,37 @@ class EnergyTrainer(BaseTrainer):
             local_rank=local_rank,
             amp=amp,
             cpu=cpu,
-            name="is2re",
+            name='s2ef',
             slurm=slurm,
             noddp=noddp,
         )
+    
+        self.evaluator = ChargeEvaluator()
+        self.name = 'charge'
+        self.cutoff = cutoff
+        self.num_probes = num_probes
+    
+    def load_loss(self):
+        self.loss_fn = {}
+        #self.loss_fn["energy"] = self.config["optim"].get("loss_energy", "mae")
+        #self.loss_fn["force"] = self.config["optim"].get("loss_force", "mae")
+        self.loss_fn["charge"] = self.config["optim"].get("loss_charge", "mae")
+        
+        for loss, loss_name in self.loss_fn.items():
+            if loss_name in ["l1", "mae"]:
+                self.loss_fn[loss] = torch.nn.L1Loss()
+            elif loss_name == "mse":
+                self.loss_fn[loss] = torch.nn.MSELoss()
+            elif loss_name == "l2mae":
+                self.loss_fn[loss] = L2MAELoss()
+            elif loss_name == "atomwisel2":
+                self.loss_fn[loss] = AtomwiseL2Loss()
+            else:
+                raise NotImplementedError(
+                    f"Unknown loss function name: {loss_name}"
+                )
+            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss])
+        
 
     def load_task(self):
         logging.info(f"Loading dataset: {self.config['task']['dataset']}")
@@ -129,7 +164,7 @@ class EnergyTrainer(BaseTrainer):
 
         if self.normalizers is not None and "target" in self.normalizers:
             self.normalizers["target"].to(self.device)
-        predictions = {"id": [], "energy": []}
+        predictions = {"id": [], "charge": []}
 
         for i, batch in tqdm(
             enumerate(loader),
@@ -142,20 +177,20 @@ class EnergyTrainer(BaseTrainer):
                 out = self._forward(batch)
 
             if self.normalizers is not None and "target" in self.normalizers:
-                out["energy"] = self.normalizers["target"].denorm(
-                    out["energy"]
+                out["charge"] = self.normalizers["target"].denorm(
+                    out["charge"]
                 )
 
             if per_image:
                 predictions["id"].extend(
                     [str(i) for i in batch[0].sid.tolist()]
                 )
-                predictions["energy"].extend(out["energy"].tolist())
+                predictions["charge"].extend(out["charge"].tolist())
             else:
-                predictions["energy"] = out["energy"].detach()
+                predictions["charge"] = out["charge"].detach()
                 return predictions
 
-        self.save_results(predictions, results_file, keys=["energy"])
+        self.save_results(predictions, results_file, keys=["charge"])
 
         if self.ema:
             self.ema.restore()
@@ -169,7 +204,7 @@ class EnergyTrainer(BaseTrainer):
         primary_metric = self.config["task"].get(
             "primary_metric", self.evaluator.task_primary_metric[self.name]
         )
-        self.best_val_mae = 1e9
+        self.best_val_metric = 1e9
 
         # Calculate start_epoch from step instead of loading the epoch number
         # to prevent inconsistencies due to different batch size in checkpoint.
@@ -189,7 +224,10 @@ class EnergyTrainer(BaseTrainer):
 
                 # Get a batch.
                 batch = next(train_loader_iter)
-
+                
+                for subbatch in batch:
+                    subbatch.input_dict = batch_to_deepDFT_dict(subbatch, cutoff=self.cutoff, num_probes=self.num_probes)
+                
                 # Forward, loss, backward.
                 with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                     out = self._forward(batch)
@@ -251,9 +289,9 @@ class EnergyTrainer(BaseTrainer):
                             val_metrics[
                                 self.evaluator.task_primary_metric[self.name]
                             ]["metric"]
-                            < self.best_val_mae
+                            < self.best_val_metric
                         ):
-                            self.best_val_mae = val_metrics[
+                            self.best_val_metric = val_metrics[
                                 self.evaluator.task_primary_metric[self.name]
                             ]["metric"]
                             self.save(
@@ -299,34 +337,186 @@ class EnergyTrainer(BaseTrainer):
             output = output.view(-1)
 
         return {
-            "energy": output,
+            "charge": output,
         }
 
     def _compute_loss(self, out, batch_list):
-        energy_target = torch.cat(
-            [batch.y_relaxed.to(self.device) for batch in batch_list], dim=0
+        charge_target = torch.cat(
+            [batch.input_dict['probe_target'].to(self.device) for batch in batch_list], dim=0
         )
 
         if self.normalizer.get("normalize_labels", False):
-            target_normed = self.normalizers["target"].norm(energy_target)
+            target_normed = self.normalizers["target"].norm(charge_target)
         else:
-            target_normed = energy_target
+            target_normed = charge_target
 
-        loss = self.loss_fn["energy"](out["energy"], target_normed)
+        loss = self.loss_fn["charge"](out["charge"], target_normed)
         return loss
 
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
-        energy_target = torch.cat(
-            [batch.y_relaxed.to(self.device) for batch in batch_list], dim=0
+        charge_target = torch.cat(
+            [batch.input_dict['probe_target'].to(self.device) for batch in batch_list], dim=0
         )
 
         if self.normalizer.get("normalize_labels", False):
-            out["energy"] = self.normalizers["target"].denorm(out["energy"])
-
+            out["charge"] = self.normalizers["target"].denorm(out["charge"])
+        
         metrics = evaluator.eval(
             out,
-            {"energy": energy_target},
+            {"charge": charge_target},
             prev_metrics=metrics,
         )
 
         return metrics
+    
+    def load_model(self):
+        # Build model
+        if distutils.is_master():
+            logging.info(f"Loading model: {self.config['model']}")
+
+        # TODO: depreicated, remove.
+        bond_feat_dim = None
+        bond_feat_dim = self.config["model_attributes"].get(
+            "num_gaussians", 50
+        )
+
+        loader = self.train_loader or self.val_loader or self.test_loader
+        
+        self.model = registry.get_model_class(self.config["model"])(
+            **self.config["model_attributes"],
+        ).to(self.device)
+
+        if distutils.is_master():
+            logging.info(
+                f"Loaded {self.model.__class__.__name__} with "
+                f"{self.model.num_params} parameters."
+            )
+
+        if self.logger is not None:
+            self.logger.watch(self.model)
+
+        self.model = OCPDataParallel(
+            self.model,
+            output_device=self.device,
+            num_gpus=1 if not self.cpu else 0,
+        )
+        if distutils.initialized() and not self.config["noddp"]:
+            self.model = DistributedDataParallel(
+                self.model, device_ids=[self.device]
+            )
+    @torch.no_grad()
+    def validate(self, split="val", disable_tqdm=False):
+        if distutils.is_master():
+            logging.info(f"Evaluating on {split}.")
+        if self.is_hpo:
+            disable_tqdm = True
+
+        self.model.eval()
+        if self.ema:
+            self.ema.store()
+            self.ema.copy_to()
+
+        evaluator, metrics = ChargeEvaluator(task='charge'), {}
+        rank = distutils.get_rank()
+
+        loader = self.val_loader if split == "val" else self.test_loader
+        
+        for i, batch in tqdm(
+            enumerate(loader),
+            total=len(loader),
+            position=rank,
+            desc="device {}".format(rank),
+            disable=disable_tqdm,
+        ):
+            for subbatch in batch:
+                    subbatch.input_dict = batch_to_deepDFT_dict(subbatch, cutoff=self.cutoff, num_probes=self.num_probes)
+            # Forward.
+            
+            with torch.cuda.amp.autocast(enabled=self.scaler is not None):
+                out = self._forward(batch)
+            loss = self._compute_loss(out, batch)
+
+            # Compute metrics.
+            metrics = self._compute_metrics(out, batch, evaluator, metrics)
+            metrics = evaluator.update("loss", loss.item(), metrics)
+
+        aggregated_metrics = {}
+        for k in metrics:
+            aggregated_metrics[k] = {
+                "total": distutils.all_reduce(
+                    metrics[k]["total"], average=False, device=self.device
+                ),
+                "numel": distutils.all_reduce(
+                    metrics[k]["numel"], average=False, device=self.device
+                ),
+            }
+            aggregated_metrics[k]["metric"] = (
+                aggregated_metrics[k]["total"] / aggregated_metrics[k]["numel"]
+            )
+        metrics = aggregated_metrics
+
+        log_dict = {k: metrics[k]["metric"] for k in metrics}
+        log_dict.update({"epoch": self.epoch})
+        if distutils.is_master():
+            log_str = ["{}: {:.4f}".format(k, v) for k, v in log_dict.items()]
+            logging.info(", ".join(log_str))
+
+        # Make plots.
+        if self.logger is not None:
+            self.logger.log(
+                log_dict,
+                step=self.step,
+                split=split,
+            )
+
+        if self.ema:
+            self.ema.restore()
+
+        return metrics
+
+class ChargeEvaluator(Evaluator):
+    def __init__(self, task = 'charge'):
+        self.task = 'charge'
+        
+        self.task_metrics['charge'] = ['charge_mse', 'charge_mae']
+        self.task_attributes['charge'] = ['charge']
+        self.task_primary_metric['charge'] = 'charge_mse'
+        
+        self.metric_fn = self.task_metrics[task]
+        
+    def eval(self, prediction, target, prev_metrics={}):
+        for attr in self.task_attributes[self.task]:
+            assert attr in prediction
+            assert attr in target
+            assert prediction[attr].shape == target[attr].shape
+
+        metrics = prev_metrics
+
+        for fn in self.task_metrics[self.task]:
+            res = eval(fn)(prediction, target)
+            metrics = self.update(fn, res, metrics)
+
+        return metrics
+
+def charge_mae(prediction, target):
+    return absolute_error(prediction['charge'], target['charge'])
+
+def absolute_error(prediction, target):
+    error = torch.abs(prediction - target)
+    return {
+        "metric": (torch.mean(error)).item(),
+        "total": torch.sum(error).item(),
+        "numel": prediction.numel(),
+    }
+
+
+def charge_mse(prediction, target):
+    return squared_error(prediction['charge'].float(), target['charge'].float())
+
+def squared_error(prediction, target):
+    error = torch.abs(prediction - target) **2
+    return {
+        "metric": (torch.mean(error)).item(),
+        "total": torch.sum(error).item(),
+        "numel": prediction.numel(),
+    }
