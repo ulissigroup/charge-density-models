@@ -1,0 +1,4 @@
+The majority of this code is copied from DeepDFT (https://github.com/peterbjorgensen/DeepDFT). However, some small changes are made for compatibility with the ocpmodles infrastructure (https://github.com/Open-Catalyst-Project/ocp). Notable changes include:
+
+- Switching neighborlist generation from asap3 to pymatgen
+- Adding the probe model to the OCP registry
