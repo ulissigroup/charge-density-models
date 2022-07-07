@@ -1,6 +1,3 @@
 Tools to build charge density models using [[https://github.com/Open-Catalyst-Project/ocp][ocpmodels]]
 
-Much of the code in the DeepDFT directory is copied from [[https://github.com/peterbjorgensen/DeepDFT][DeepDFT]]. However, some small changes are made for compatibility with the ocpmodles infrastructure. Notable changes include:
-
-- Switching neighborlist generation from asap3 to pymatgen
-- Adding the probe model to the OCP registry
+Some important parts of the code are copied from [[https://github.com/peterbjorgensen/DeepDFT][DeepDFT]]. All of this code is contained in the chg_utils.py file, and the portions from DeepDFT are labelled.
