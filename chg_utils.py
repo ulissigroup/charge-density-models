@@ -10,8 +10,11 @@ from pymatgen.core.sites import PeriodicSite
 from pymatgen.io.ase import AseAtomsAdaptor
 from torch_geometric.data import Data
 from ase import Atoms
+from ase.calculators.vasp import VaspChargeDensity
+import ase.neighborlist as nbl
 
-from DeepDFT.dataset import atoms_and_probe_sample_to_graph_dict, _calculate_grid_pos, collate_list_of_dicts
+# from DeepDFT.dataset import atoms_and_probe_sample_to_graph_dict, _calculate_grid_pos, collate_list_of_dicts
+
 
 import pdb
 
@@ -248,172 +251,12 @@ class charge_density:
         out += f'Charge Points Grid: {self.grid[0]} {self.grid[1]} {self.grid[2]}\n'
         return out
     
-def get_probe_graph(data, include_atomic_edges = False):
-    data.atomic_numbers = torch.cat((data.atomic_numbers, torch.zeros(data.charge_vals.shape, device=data.atomic_numbers.device)))
-    data.batch = torch.cat((data.batch, torch.zeros(data.charge_vals.shape, device=data.atomic_numbers.device)))
-    
-    data.pos = torch.cat((data.pos, data.charge_pos), dim=0)
-    
-    if include_atomic_edges:
-        data.num_atomic_edges = data.edge_representations[0].size()[0]
-        data.edge_index = torch.cat((data.edge_index, data.charge_edges), dim=1)
-        data.cell_offsets = torch.cat((data.cell_offsets, data.charge_cell_offsets),
-                                      dim = 0)
-        data.neighbors = data.neighbors + data.charge_neighbors
-        
-    else:
-        data.edge_index = data.charge_edges.T
-        data.cell_offsets = data.charge_cell_offsets
-        data.neighbors = data.charge_neighbors
-                                      
-    return data
-
-class AtomsToChargeGraphs(AtomsToGraphs):
-    '''
-    deprecating
-    '''
-    def __init__(
-        self,
-        max_neigh=200,
-        radius=6,
-        r_energy=False,
-        r_forces=False,
-        r_distances=False,
-        r_edges=True,
-        r_fixed=False,
-        r_charge=True,
-        n_pts = 1000,
-        mode = 'random',
-    ):
-        super(AtomsToChargeGraphs, self).__init__(
-            max_neigh,
-            radius,
-            r_energy,
-            r_forces,
-            r_distances,
-            r_edges,
-            r_fixed,
-        )
-        
-        self.r_charge = r_charge
-        self.n_pts = n_pts
-        self.mode = mode
-        
-    def convert(
-        self,
-        atoms,
-    ):
-        """Convert a single atomic stucture to a graph.
-
-        Args:
-            atoms (ase.atoms.Atoms): An ASE atoms object.
-
-        Returns:
-            data (torch_geometric.data.Data): A torch geometic data object with edge_index, positions, atomic_numbers,
-            and optionally, energy, forces, and distances.
-            Optional properties can included by setting r_property=True when constructing the class.
-        """
-
-        # set the atomic numbers, positions, and cell
-        atomic_numbers = torch.Tensor(atoms.get_atomic_numbers())
-        positions = torch.Tensor(atoms.get_positions())
-        cell = torch.Tensor(atoms.get_cell()).view(1, 3, 3)
-        natoms = positions.shape[0]
-
-        # put the minimum data in torch geometric data object
-        data = Data(
-            cell=cell,
-            pos=positions,
-            atomic_numbers=atomic_numbers,
-            natoms=natoms,
-        )
-
-        # optionally include other properties
-        if self.r_edges:
-            # run internal functions to get padded indices and distances
-            split_idx_dist = self._get_neighbors_pymatgen(atoms)
-            edge_index, edge_distances, cell_offsets = self._reshape_features(
-                *split_idx_dist
-            )
-
-            data.edge_index = edge_index
-            data.cell_offsets = cell_offsets
-        if self.r_energy:
-            energy = atoms.get_potential_energy(apply_constraint=False)
-            data.y = energy
-        if self.r_forces:
-            forces = torch.Tensor(atoms.get_forces(apply_constraint=False))
-            data.force = forces
-        if self.r_distances and self.r_edges:
-            data.distances = edge_distances
-        if self.r_fixed:
-            fixed_idx = torch.zeros(natoms)
-            if hasattr(atoms, "constraints"):
-                from ase.constraints import FixAtoms
-
-                for constraint in atoms.constraints:
-                    if isinstance(constraint, FixAtoms):
-                        fixed_idx[constraint.index] = 1
-            data.fixed = fixed_idx
-
-        if self.r_charge:
-            struct = AseAtomsAdaptor.get_structure(atoms)
-            site_list = []
-            
-            pts = len(mesh[0]) * len(mesh[1]) * len(mesh[2])
-            charge_pos = np.zeros([pts, 3])
-            charge_vals = np.zeros(pts)
-
-            point = 0
-            for p1 in mesh[0]:
-                for p2 in mesh[1]:
-                    for p3 in mesh[2]:
-                        
-                        charge_vals[point] = atoms.charge_density[p1, p2, p3]
-
-                        uc_coords = np.array([p1, p2, p3]) / atoms.charge_grid
-
-                        site = PeriodicSite(
-                            species = 1,
-                            coords = uc_coords,
-                            lattice = struct.lattice,
-                            to_unit_cell = True
-                        )
-
-                        site_list.append(site)
-
-                        charge_pos[point, :] = site.coords
-                        
-                        point += 1
-
-                # [to, from] is the convention used by OCP
-
-            a, b, c, d = struct.get_neighbor_list(
-                r=self.radius,
-                sites = site_list,
-                numerical_tol=0, 
-                exclude_self=True
-            )
-
-            edge_index, edge_distances, cell_offsets = self._reshape_features(
-                a, b, d, c
-            )
-
-            data.charge_pos = torch.Tensor(charge_pos)
-            data.charge_vals = torch.Tensor(charge_vals)
-            data.charge_edges = torch.LongTensor(edge_index).flipud()
-            data.charge_edges[0] += data.natoms
-            data.charge_edges = data.charge_edges.T
-            data.charge_cell_offsets = torch.LongTensor(cell_offsets)
-            data.charge_neighbors = torch.LongTensor([data.charge_edges.shape[0]])
-
-        return data
 
 def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False):
     a2g = AtomsToGraphs(
         max_neigh = 100,
         radius = 6,
-        r_energy = True,
+        r_energy = False,
         r_forces = False,
         r_distances = False,
         r_fixed = False,
@@ -434,12 +277,18 @@ def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False):
     for fid, directory in enumerate(paths):
         if loud:
             print(directory)
-        atoms = ase.io.read(os.path.join(inpath, directory, 'OUTCAR'))
-        dens = charge_density(os.path.join(inpath, directory, 'CHGCAR'))
+            
+        vcd = VaspChargeDensity(os.path.join(inpath, directory, 'CHGCAR'))
+        atoms = vcd.atoms[-1]
+        dens = vcd.chg[-1]
+        
+        #atoms = ase.io.read(os.path.join(inpath, directory, 'OUTCAR'))
+        #dens = charge_density(os.path.join(inpath, directory, 'CHGCAR'))
 
         data_object = a2g.convert(atoms)
         
-        data_object.charge_density = dens.charge
+        data_object.charge_density = dens
+        #ata_object.vcd = vcd
 
         txn = db.begin(write = True)
         txn.put(f"{fid}".encode("ascii"), pickle.dumps(data_object,protocol=-1))
@@ -455,155 +304,122 @@ def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False):
     db.close()
     
 
-class BatchToChargeGraphs(AtomsToGraphs):
-    def __init__(
-        self,
-        max_neigh=200,
-        radius=6,
-        r_energy=False,
-        r_forces=False,
-        r_distances=False,
-        r_edges=True,
-        r_fixed=False,
-        r_charge=True,
-        n_pts = 1000,
-        mode = 'random',
-    ):
-        super().__init__(
-            max_neigh,
-            radius,
-            r_energy,
-            r_forces,
-            r_distances,
-            r_edges,
-            r_fixed,
-        )
-
-        self.r_charge = r_charge
-        self.n_pts = n_pts
-        self.mode = mode
-    
-    def construct_probe_graphs(self, batch):
-        # Build atoms objects
-        atoms_objects = batch_to_atoms(batch)
-
-        batch.charge_pos = torch.zeros((0,3))
-        batch.charge_vals = torch.zeros(0)
-        batch.charge_edges = torch.zeros((0,2))
-        batch.charge_cell_offsets = torch.zeros((0,3))
-        batch.charge_neighbors = torch.zeros(0)
+class ProbeGraphAdder():
+    """
+    Large portions copied from DeepDFT
+    """
+    def __init__(self, num_probes=1000, cutoff=5, include_atomic_edges=False):
+        self.num_probes = num_probes
+        self.cutoff = cutoff
+        self.include_atomic_edges = include_atomic_edges
+    def __call__(self, data_object):
+        probe_data = Data()
+        atoms = Atoms(numbers = data_object.atomic_numbers.tolist(),
+                      positions = data_object.pos.cpu().detach().numpy(),
+                      cell = data_object.cell.cpu().detach().numpy()[0],
+                      pbc = [True, True, True])
         
-        offset = torch.sum(batch.natoms)
-
-        for i, atoms in enumerate(atoms_objects):
-            struct = AseAtomsAdaptor.get_structure(atoms)
-
-            # Add probe points
-            if self.mode == 'random':
-                grid = batch.charge_density[i].shape
-                charge_vals = np.zeros(self.n_pts)
-                site_list = []
-                charge_pos = np.zeros((self.n_pts, 3))
-
-                for point in range(self.n_pts):
-                    p1, p2, p3 = [np.random.randint(0, grid[i]) for i in [0, 1, 2]]
-                    charge_vals[point] = batch.charge_density[i][p1, p2, p3]
-                    uc_coords = np.array([p1, p2, p3]) / grid
-
-                    site = PeriodicSite(
-                                species = 1,
-                                coords = uc_coords,
-                                lattice = struct.lattice,
-                                to_unit_cell = True
-                            )
-                    site_list.append(site)
-                    charge_pos[point, :] = site.coords
-            
-            if self.mode == 'all':
-                grid = batch.charge_density[i].shape
-                charge_vals = np.zeros(np.prod(grid))
-                site_list = []
-                charge_pos = np.zeros((np.prod(grid), 3))
-                
-                point = 0
-                for p1 in range(grid[0]):
-                    for p2 in range(grid[1]):
-                        for p3 in range(grid[2]):
-                            charge_vals[point] = batch.charge_density[i][p1, p2, p3]
-                            uc_coords = np.array([p1, p2, p3]) / grid
-                            
-                            site = PeriodicSite(
-                                species = 1,
-                                coords = uc_coords,
-                                lattice = struct.lattice,
-                                to_unit_cell = True
-                            )
-                    site_list.append(site)
-                    charge_pos[point, :] = site.coords
-                    
-
-            # Get graph information
-            a, b, c, d = struct.get_neighbor_list(
-            r=self.radius,
-            sites = site_list,
-            numerical_tol=0, 
-            exclude_self=True
-        )
-
-            edge_index, edge_distances, cell_offsets = self._reshape_features(
-                a, b, d, c
-            )
-
-            batch.charge_pos = torch.cat((batch.charge_pos, torch.tensor(charge_pos)))
-            batch.charge_vals = torch.cat((batch.charge_vals, torch.tensor(charge_vals)))
-            
-            charge_edges = torch.LongTensor(edge_index)
-            charge_edges[0] += torch.sum(batch.natoms[:i])
-            charge_edges[1] += offset
-            batch.charge_edges = torch.cat((batch.charge_edges, charge_edges.T))
-            
-            batch.charge_cell_offsets = torch.cat((batch.charge_cell_offsets, cell_offsets.clone().detach()))
-            batch.charge_neighbors = torch.cat((batch.charge_neighbors, torch.tensor([charge_edges.shape[1]])))
-            
-            offset += len(charge_pos)
-            
-        #batch.charge_edges = batch.charge_edges.fliplr()
-        batch.charge_edges = batch.charge_edges.to(torch.long)
-        batch.charge_cell_offsets = batch.charge_cell_offsets.to(torch.long)
-        batch.charge_neighbors = batch.charge_neighbors.to(torch.long)
-
-        return batch
-    
-def batch_to_atoms(batch):
-    n_systems = batch.neighbors.shape[0]
-    natoms = batch.natoms.tolist()
-    numbers = torch.split(batch.atomic_numbers, natoms)
-    positions = torch.split(batch.pos, natoms)
-    cells = batch.cell
-
-    atoms_objects = []
-    for idx in range(n_systems):
-        atoms = Atoms(
-            numbers=numbers[idx].tolist(),
-            positions=positions[idx].cpu().detach().numpy(),
-            cell=cells[idx].cpu().detach().numpy(),
-            pbc=[True, True, True],
-        )
-        atoms_objects.append(atoms)
-
-    return atoms_objects
-    
-def batch_to_deepDFT_dict(batch, cutoff, num_probes):
-    
-    list_of_dicts = []
-    atoms_objects = batch_to_atoms(batch)
-    
-    for density, atoms, cell in zip(batch.charge_density, atoms_objects, batch.cell):
-        grid_pos = _calculate_grid_pos(density, [0, 0, 0], cell)
+        density = np.array(data_object.charge_density)
         
-        input_dict = atoms_and_probe_sample_to_graph_dict(density, atoms, grid_pos, cutoff, num_probes)
-        list_of_dicts.append(input_dict)
+        grid_pos = _calculate_grid_pos(density, [0,0,0], data_object.cell)
         
-    return collate_list_of_dicts(list_of_dicts)
+        probe_choice_max = np.prod(grid_pos.shape[0:3])
+        probe_choice = np.random.randint(probe_choice_max, size = self.num_probes)
+        probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+        
+        probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
+        probe_target = density[probe_choice]
+        
+        probe_atoms = Atoms(numbers = [0] * self.num_probes, positions = probe_pos)
+        atoms_with_probes = atoms.copy()
+        atoms_with_probes.extend(probe_atoms)
+        atomic_numbers = atoms_with_probes.get_atomic_numbers()
+        
+        # probe_data.cell
+        probe_data.cell = data_object.cell
+        
+        # probe_data.atomic_numbers
+        probe_data.atomic_numbers = torch.Tensor(atomic_numbers)
+            
+        # probe_data.natoms
+        probe_data.natoms = torch.LongTensor([int(len(atomic_numbers))])
+            
+        # probe_data.pos
+        probe_data.pos = torch.cat((data_object.pos, torch.Tensor(probe_pos)))
+        
+        # probe_data.target
+        probe_data.target = torch.Tensor(probe_target)
+        
+        # probe_data.edge_index
+        probe_edges = []
+        probe_offsets = []
+        neighborlist = AseNeighborListWrapper(self.cutoff, atoms_with_probes)
+        
+        results = [neighborlist.get_neighbors(i+len(atoms), self.cutoff) for i in range(self.num_probes)]
+        
+        for i, (neigh_idx, neigh_offset) in enumerate(results):
+            neigh_atomic_species = atomic_numbers[neigh_idx]
+            neigh_is_atom = neigh_atomic_species != 0
+            neigh_atoms = neigh_idx[neigh_is_atom]
+            self_index = np.ones_like(neigh_atoms) * i + len(atoms)
+            edges = np.stack((neigh_atoms, self_index), axis = 1)
+            probe_edges.append(edges)
+            probe_offsets.append(neigh_offset[neigh_is_atom])
+            
+        probe_data.edge_index = torch.tensor(np.concatenate(probe_edges, axis=0)).T#.flipud()
+        
+        # probe_data.cell_offsets
+        probe_data.cell_offsets = torch.tensor(np.concatenate(probe_offsets, axis=0))
+        
+        # probe_data.neighbors
+        
+        probe_data.neighbors = torch.LongTensor([probe_data.edge_index.shape[1]])
+        
+        if self.include_atomic_edges:
+            raise NotImplementedError()
+        
+        data_object.probe_data = probe_data
+        return data_object
     
+class AseNeighborListWrapper:
+    """
+    Wrapper around ASE neighborlist to have the same interface as asap3 neighborlist
+    Modified from DeepDFT
+    """
+
+    def __init__(self, cutoff, atoms):
+        self.neighborlist = nbl.NewPrimitiveNeighborList(
+            cutoff, skin=0.0, self_interaction=False, bothways=True
+        )
+        self.neighborlist.build(
+            atoms.get_pbc(), atoms.get_cell(), atoms.get_positions()
+        )
+        self.cutoff = cutoff
+        self.atoms_positions = atoms.get_positions()
+        self.atoms_cell = atoms.get_cell()
+
+    def get_neighbors(self, i, cutoff):
+        assert (
+            cutoff == self.cutoff
+        ), "Cutoff must be the same as used to initialise the neighborlist"
+
+        indices, offsets = self.neighborlist.get_neighbors(i)
+        
+        return indices, offsets
     
+def _calculate_grid_pos(density, origin, cell):
+    """
+    From DeepDFT
+    """
+    # Calculate grid positions
+    ngridpts = np.array(density.shape)  # grid matrix
+    grid_pos = np.meshgrid(
+        np.arange(ngridpts[0]) / density.shape[0],
+        np.arange(ngridpts[1]) / density.shape[1],
+        np.arange(ngridpts[2]) / density.shape[2],
+        indexing="ij",
+    )
+    grid_pos = np.stack(grid_pos, 3)
+    grid_pos = np.dot(grid_pos, cell)
+    grid_pos = grid_pos + origin
+    return grid_pos

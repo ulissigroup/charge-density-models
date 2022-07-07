@@ -20,7 +20,9 @@ from ocpmodels.common.data_parallel import (
 
 from ocpmodels.modules.loss import AtomwiseL2Loss, DDPLoss, L2MAELoss
 from ocpmodels.modules.evaluator import *
-from chg_utils import batch_to_deepDFT_dict
+
+from chg_utils import ProbeGraphAdder
+from torch_geometric.data import Batch
 
 import pdb
 
@@ -75,16 +77,23 @@ class ChargeTrainer(BaseTrainer):
         is_hpo=False,
         print_every=100,
         seed=None,
-        logger="tensorboard",
+        logger="wandb",
         local_rank=0,
         amp=False,
         cpu=False,
         slurm={},
         noddp=False,
         name=None,
-        cutoff = 5,
-        num_probes = 1000,
+        cutoff = 6,
+        train_probes = 1000,
+        val_probes = 5000,
+        test_probes = 5000,
+        trainer = 'charge',
     ):
+        
+        self.pga_train = ProbeGraphAdder(num_probes = train_probes, cutoff = cutoff)
+        self.pga_val = ProbeGraphAdder(num_probes = val_probes, cutoff = cutoff)
+        self.pga_test = ProbeGraphAdder(num_probes = test_probes, cutoff = cutoff)
  
         super().__init__(
             task=task,
@@ -111,7 +120,6 @@ class ChargeTrainer(BaseTrainer):
         self.evaluator = ChargeEvaluator()
         self.name = 'charge'
         self.cutoff = cutoff
-        self.num_probes = num_probes
     
     def load_loss(self):
         self.loss_fn = {}
@@ -173,6 +181,10 @@ class ChargeTrainer(BaseTrainer):
             desc="device {}".format(rank),
             disable=disable_tqdm,
         ):
+            
+            for subbatch in batch:
+                subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
+            
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch)
 
@@ -226,7 +238,7 @@ class ChargeTrainer(BaseTrainer):
                 batch = next(train_loader_iter)
                 
                 for subbatch in batch:
-                    subbatch.input_dict = batch_to_deepDFT_dict(subbatch, cutoff=self.cutoff, num_probes=self.num_probes)
+                    subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
                 
                 # Forward, loss, backward.
                 with torch.cuda.amp.autocast(enabled=self.scaler is not None):
@@ -341,8 +353,9 @@ class ChargeTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, out, batch_list):
+        
         charge_target = torch.cat(
-            [batch.input_dict['probe_target'].to(self.device) for batch in batch_list], dim=0
+            [batch.probe_data.target for batch in batch_list], dim=0
         )
 
         if self.normalizer.get("normalize_labels", False):
@@ -355,7 +368,7 @@ class ChargeTrainer(BaseTrainer):
 
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
         charge_target = torch.cat(
-            [batch.input_dict['probe_target'].to(self.device) for batch in batch_list], dim=0
+             [batch.probe_data.target for batch in batch_list], dim=0
         )
 
         if self.normalizer.get("normalize_labels", False):
@@ -429,9 +442,9 @@ class ChargeTrainer(BaseTrainer):
             disable=disable_tqdm,
         ):
             for subbatch in batch:
-                    subbatch.input_dict = batch_to_deepDFT_dict(subbatch, cutoff=self.cutoff, num_probes=self.num_probes)
+                subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
+                                                    
             # Forward.
-            
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch)
             loss = self._compute_loss(out, batch)
@@ -473,6 +486,79 @@ class ChargeTrainer(BaseTrainer):
             self.ema.restore()
 
         return metrics
+    
+    def load_datasets(self):
+        self.parallel_collater = ParallelCollater(
+            0 if self.cpu else 1,
+            self.config["model_attributes"].get("otf_graph", False),
+        )
+
+        self.train_loader = self.val_loader = self.test_loader = None
+
+        if self.config.get("dataset", None):
+            self.train_dataset = registry.get_dataset_class(
+                self.config["task"]["dataset"]
+            )(self.config["dataset"], transform = self.pga_train)
+            self.train_sampler = self.get_sampler(
+                self.train_dataset,
+                self.config["optim"]["batch_size"],
+                shuffle=True,
+            )
+            self.train_loader = self.get_dataloader(
+                self.train_dataset,
+                self.train_sampler,
+            )
+
+            if self.config.get("val_dataset", None):
+                self.val_dataset = registry.get_dataset_class(
+                    self.config["task"]["dataset"]
+                )(self.config["val_dataset"], transform = self.pga_val)
+                self.val_sampler = self.get_sampler(
+                    self.val_dataset,
+                    self.config["optim"].get(
+                        "eval_batch_size", self.config["optim"]["batch_size"]
+                    ),
+                    shuffle=False,
+                )
+                self.val_loader = self.get_dataloader(
+                    self.val_dataset,
+                    self.val_sampler,
+                )
+
+            if self.config.get("test_dataset", None):
+                self.test_dataset = registry.get_dataset_class(
+                    self.config["task"]["dataset"]
+                )(self.config["test_dataset"], transform = self.pga_test)
+                self.test_sampler = self.get_sampler(
+                    self.test_dataset,
+                    self.config["optim"].get(
+                        "eval_batch_size", self.config["optim"]["batch_size"]
+                    ),
+                    shuffle=False,
+                )
+                self.test_loader = self.get_dataloader(
+                    self.test_dataset,
+                    self.test_sampler,
+                )
+
+        # Normalizer for the dataset.
+        # Compute mean, std of training set labels.
+        self.normalizers = {}
+        if self.normalizer.get("normalize_labels", False):
+            if "target_mean" in self.normalizer:
+                self.normalizers["target"] = Normalizer(
+                    mean=self.normalizer["target_mean"],
+                    std=self.normalizer["target_std"],
+                    device=self.device,
+                )
+            else:
+                self.normalizers["target"] = Normalizer(
+                    tensor=self.train_loader.dataset.data.y[
+                        self.train_loader.dataset.__indices__
+                    ],
+                    device=self.device,
+                )
+
 
 class ChargeEvaluator(Evaluator):
     def __init__(self, task = 'charge'):
@@ -480,7 +566,7 @@ class ChargeEvaluator(Evaluator):
         
         self.task_metrics['charge'] = ['charge_mse', 'charge_mae']
         self.task_attributes['charge'] = ['charge']
-        self.task_primary_metric['charge'] = 'charge_mse'
+        self.task_primary_metric['charge'] = 'charge_mae'
         
         self.metric_fn = self.task_metrics[task]
         

@@ -53,19 +53,6 @@ class schnet_charge(SchNet):
         )
         self.atomic = atomic
         self.probe = probe
-        
-        if self.probe:
-            # From DeepDFT
-            self.probe_state_gate_functions = torch.nn.ModuleList(
-            [
-                torch.nn.Sequential(
-                    torch.nn.Linear(hidden_channels, hidden_channels),
-                    ShiftedSoftplus(),
-                    torch.nn.Linear(hidden_channels, hidden_channels),
-                    torch.nn.Sigmoid(),
-                )
-                for _ in range(num_interactions)
-            ])
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -85,7 +72,6 @@ class schnet_charge(SchNet):
         # for get_pbc_distances call
         if self.use_pbc:
             assert z.dim() == 1 and z.dtype == torch.long
-
             out = get_pbc_distances(
                 pos,
                 data.edge_index,
@@ -94,38 +80,35 @@ class schnet_charge(SchNet):
                 data.neighbors,
             )
             
-            data.cell
-
             edge_index = out["edge_index"]
             edge_weight = out["distances"]
             edge_attr = self.distance_expansion(edge_weight)
             
-            h = self.embedding(z)
-            h[torch.sum(data.natoms):, :] = torch.zeros(*h[torch.sum(data.natoms):, :].size())
+        h = self.embedding(z)
 
-            if self.atomic:
-                h_list = []
-                for i, interaction, in enumerate(self.interactions):
-                    h = h + interaction(h, edge_index, edge_weight, edge_attr)
-                    h_list.append(h)
-                    
-                atom_representations = torch.stack(h_list)
-                return atom_representations
+        if self.atomic:
+            h_list = []
+            for i, interaction, in enumerate(self.interactions):
+                h = h + interaction(h, edge_index, edge_weight, edge_attr)
+                h_list.append(h)
+
+            atom_representations = h_list
+            return atom_representations
+
+        if self.probe:
+            #n_atoms = data.atom_representations[0].shape[0]
+            atom_indices = torch.nonzero(data.atomic_numbers).flatten()
+            probe_indices = (data.atomic_numbers == 0).nonzero()
             
-            if self.probe:
-                edge_weight = edge_weight.float()
-                edge_attr = edge_attr.float()
-                for interaction_number, (interaction, gate_layer) in enumerate(zip(self.interactions, self.probe_state_gate_functions)):
-                    
-                    msgsum = interaction(h, edge_index, edge_weight, edge_attr)
-                    gates = gate_layer(h)
-                
-                    h = h * gates + (1-gates) * msgsum
+            edge_weight = edge_weight.float()
+            edge_attr = edge_attr.float()
+            
+            for interaction_number, interaction in enumerate(self.interactions):
 
-                    h[:torch.sum(data.natoms), :] = data.atom_representations[interaction_number]
-
-                return h[torch.sum(data.natoms):, :]
+                h = h + interaction(h, edge_index, edge_weight, edge_attr)
                 
-class ShiftedSoftplus(torch.nn.Module):
-    def forward(self, x):
-        return torch.nn.functional.softplus(x) - np.log(2.0)
+                h[atom_indices] = data.atom_representations[interaction_number]
+
+                #h[:n_atoms, :] = data.atom_representations[interaction_number]
+
+            return h[probe_indices]
