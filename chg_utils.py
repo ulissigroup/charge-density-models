@@ -13,10 +13,8 @@ from ase import Atoms
 from ase.calculators.vasp import VaspChargeDensity
 import ase.neighborlist as nbl
 
-# from DeepDFT.dataset import atoms_and_probe_sample_to_graph_dict, _calculate_grid_pos, collate_list_of_dicts
-
-
 import pdb
+import time
 
 class charge_density:
     def __init__(self, inpath=None, spin_polarized = False):
@@ -353,20 +351,21 @@ class ProbeGraphAdder():
         # probe_data.edge_index
         probe_edges = []
         probe_offsets = []
+        
         neighborlist = AseNeighborListWrapper(self.cutoff, atoms_with_probes)
         
-        results = [neighborlist.get_neighbors(i+len(atoms), self.cutoff) for i in range(self.num_probes)]
+        results = [neighborlist.get_neighbors(i, self.cutoff) for i in range(len(atoms))]
         
         for i, (neigh_idx, neigh_offset) in enumerate(results):
             neigh_atomic_species = atomic_numbers[neigh_idx]
-            neigh_is_atom = neigh_atomic_species != 0
-            neigh_atoms = neigh_idx[neigh_is_atom]
-            self_index = np.ones_like(neigh_atoms) * i + len(atoms)
-            edges = np.stack((neigh_atoms, self_index), axis = 1)
+            neigh_is_probe = neigh_atomic_species == 0
+            neigh_probes = neigh_idx[neigh_is_probe]
+            atom_index = np.ones_like(neigh_probes) * i
+            edges = np.stack((atom_index, neigh_probes), axis = 1)
             probe_edges.append(edges)
-            probe_offsets.append(neigh_offset[neigh_is_atom])
-            
-        probe_data.edge_index = torch.tensor(np.concatenate(probe_edges, axis=0)).T#.flipud()
+            probe_offsets.append(neigh_offset[neigh_is_probe])
+        
+        probe_data.edge_index = torch.tensor(np.concatenate(probe_edges, axis=0)).T
         
         # probe_data.cell_offsets
         probe_data.cell_offsets = torch.tensor(np.concatenate(probe_offsets, axis=0))
@@ -389,11 +388,13 @@ class AseNeighborListWrapper:
 
     def __init__(self, cutoff, atoms):
         self.neighborlist = nbl.NewPrimitiveNeighborList(
-            cutoff, skin=0.0, self_interaction=False, bothways=True
+            cutoff, skin=0.0, self_interaction=False, bothways=False
         )
+        
         self.neighborlist.build(
             atoms.get_pbc(), atoms.get_cell(), atoms.get_positions()
         )
+        
         self.cutoff = cutoff
         self.atoms_positions = atoms.get_positions()
         self.atoms_cell = atoms.get_cell()

@@ -25,6 +25,7 @@ from chg_utils import ProbeGraphAdder
 from torch_geometric.data import Batch
 
 import pdb
+import time
 
 @registry.register_trainer("charge")
 class ChargeTrainer(BaseTrainer):
@@ -230,13 +231,15 @@ class ChargeTrainer(BaseTrainer):
             train_loader_iter = iter(self.train_loader)
 
             for i in range(skip_steps, len(self.train_loader)):
+                
                 self.epoch = epoch_int + (i + 1) / len(self.train_loader)
                 self.step = epoch_int * len(self.train_loader) + i + 1
                 self.model.train()
 
                 # Get a batch.
+
                 batch = next(train_loader_iter)
-                
+
                 for subbatch in batch:
                     subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
                 
@@ -245,7 +248,9 @@ class ChargeTrainer(BaseTrainer):
                     out = self._forward(batch)
                     loss = self._compute_loss(out, batch)
                 loss = self.scaler.scale(loss) if self.scaler else loss
+                
                 self._backward(loss)
+                
                 scale = self.scaler.get_scale() if self.scaler else 1.0
 
                 # Compute metrics.
