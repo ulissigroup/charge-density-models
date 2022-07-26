@@ -11,6 +11,7 @@ from ocpmodels.common import distutils
 from ocpmodels.common.registry import registry
 from ocpmodels.modules.normalizer import Normalizer
 from ocpmodels.trainers.base_trainer import BaseTrainer
+from ocpmodels.common.utils import pyg2_data_transform
 
 from ocpmodels.common.data_parallel import (
     BalancedBatchSampler,
@@ -86,15 +87,15 @@ class ChargeTrainer(BaseTrainer):
         noddp=False,
         name=None,
         cutoff = 6,
-        train_probes = 1000,
-        val_probes = 5000,
-        test_probes = 5000,
+        #train_probes = 1000,
+        #val_probes = 5000,
+        #test_probes = 5000,
         trainer = 'charge',
     ):
         
-        self.pga_train = ProbeGraphAdder(num_probes = train_probes, cutoff = cutoff)
-        self.pga_val = ProbeGraphAdder(num_probes = val_probes, cutoff = cutoff)
-        self.pga_test = ProbeGraphAdder(num_probes = test_probes, cutoff = cutoff)
+        self.pga_train = ProbeGraphAdder(slice_start = 0, num_probes = 300, mode='all', cutoff = cutoff, stride = 4)
+        self.pga_val = ProbeGraphAdder(slice_start = 0, num_probes = 300, mode='all', cutoff = cutoff, stride = 4)
+        self.pga_test = ProbeGraphAdder(slice_start = 0, num_probes = 300, mode='all', cutoff = cutoff, stride = 4)
  
         super().__init__(
             task=task,
@@ -241,6 +242,7 @@ class ChargeTrainer(BaseTrainer):
                 batch = next(train_loader_iter)
 
                 for subbatch in batch:
+                    subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
                     subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
                 
                 # Forward, loss, backward.
@@ -447,6 +449,7 @@ class ChargeTrainer(BaseTrainer):
             disable=disable_tqdm,
         ):
             for subbatch in batch:
+                subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
                 subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
                                                     
             # Forward.
@@ -503,7 +506,7 @@ class ChargeTrainer(BaseTrainer):
         if self.config.get("dataset", None):
             self.train_dataset = registry.get_dataset_class(
                 self.config["task"]["dataset"]
-            )(self.config["dataset"], transform = self.pga_train)
+            )(self.config["dataset"], transform = None) #self.pga_train)
             self.train_sampler = self.get_sampler(
                 self.train_dataset,
                 self.config["optim"]["batch_size"],
@@ -517,7 +520,7 @@ class ChargeTrainer(BaseTrainer):
             if self.config.get("val_dataset", None):
                 self.val_dataset = registry.get_dataset_class(
                     self.config["task"]["dataset"]
-                )(self.config["val_dataset"], transform = self.pga_val)
+                )(self.config["val_dataset"], transform = None) #self.pga_val)
                 self.val_sampler = self.get_sampler(
                     self.val_dataset,
                     self.config["optim"].get(
@@ -533,7 +536,7 @@ class ChargeTrainer(BaseTrainer):
             if self.config.get("test_dataset", None):
                 self.test_dataset = registry.get_dataset_class(
                     self.config["task"]["dataset"]
-                )(self.config["test_dataset"], transform = self.pga_test)
+                )(self.config["test_dataset"], transform = None) #self.pga_test)
                 self.test_sampler = self.get_sampler(
                     self.test_dataset,
                     self.config["optim"].get(

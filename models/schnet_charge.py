@@ -58,6 +58,7 @@ class schnet_charge(SchNet):
         pos = data.pos
         batch = data.batch
 
+        '''
         if self.otf_graph:
             edge_index, cell_offsets, neighbors = radius_graph_pbc(
                 data, self.cutoff, 50
@@ -65,6 +66,7 @@ class schnet_charge(SchNet):
             data.edge_index = edge_index
             data.cell_offsets = cell_offsets
             data.neighbors = neighbors
+            '''
 
         # TODO return distance computation in radius_graph_pbc to remove need
         # for get_pbc_distances call
@@ -94,19 +96,14 @@ class schnet_charge(SchNet):
             return atom_representations
 
         if self.probe:
-            #n_atoms = data.atom_representations[0].shape[0]
             atom_indices = torch.nonzero(data.atomic_numbers).flatten()
-            probe_indices = (data.atomic_numbers == 0).nonzero()
+            probe_indices = (data.atomic_numbers == 0).nonzero().flatten()
             
             edge_weight = edge_weight.float()
             edge_attr = edge_attr.float()
             
             for interaction_number, interaction in enumerate(self.interactions):
-
                 h = h + interaction(h, edge_index, edge_weight, edge_attr)
-                
                 h[atom_indices] = data.atom_representations[interaction_number]
-
-                #h[:n_atoms, :] = data.atom_representations[interaction_number]
 
             return h[probe_indices]
