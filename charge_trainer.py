@@ -86,17 +86,38 @@ class ChargeTrainer(BaseTrainer):
         slurm={},
         noddp=False,
         name=None,
-        cutoff = 6,
-        #train_probes = 1000,
-        #val_probes = 5000,
-        #test_probes = 5000,
+        probe_graph_config = {
+            'cutoff':4,
+            'train_probes':300,
+            'val_probes': 300,
+            'test_probes': 300,
+            'include_atomic_edges': False,
+        },
         trainer = 'charge',
     ):
         
-        self.pga_train = ProbeGraphAdder(slice_start = 0, num_probes = 300, mode='all', cutoff = cutoff, stride = 4)
-        self.pga_val = ProbeGraphAdder(slice_start = 0, num_probes = 300, mode='all', cutoff = cutoff, stride = 4)
-        self.pga_test = ProbeGraphAdder(slice_start = 0, num_probes = 300, mode='all', cutoff = cutoff, stride = 4)
- 
+        self.pga_train = ProbeGraphAdder(slice_start = 0, 
+                                         num_probes = probe_graph_config['train_probes'], 
+                                         mode='random', 
+                                         cutoff = probe_graph_config['cutoff'], 
+                                         stride = 1,
+                                         include_atomic_edges = probe_graph_config['include_atomic_edges'],
+                                        )
+        
+        self.pga_val = ProbeGraphAdder(slice_start = 0, 
+                                         num_probes = probe_graph_config['val_probes'], 
+                                         mode='random', 
+                                         cutoff = probe_graph_config['cutoff'], 
+                                         stride = 1,
+                                         include_atomic_edges = probe_graph_config['include_atomic_edges'],
+                                        )
+        self.pga_test = ProbeGraphAdder(slice_start = 0,
+                                         num_probes = probe_graph_config['test_probes'], 
+                                         mode='random', 
+                                         cutoff = probe_graph_config['cutoff'], 
+                                         stride = 1,
+                                         include_atomic_edges = probe_graph_config['include_atomic_edges'],
+                                        )
         super().__init__(
             task=task,
             model=model,
@@ -121,7 +142,6 @@ class ChargeTrainer(BaseTrainer):
     
         self.evaluator = ChargeEvaluator()
         self.name = 'charge'
-        self.cutoff = cutoff
     
     def load_loss(self):
         self.loss_fn = {}
@@ -185,6 +205,7 @@ class ChargeTrainer(BaseTrainer):
         ):
             
             for subbatch in batch:
+                subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
                 subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
             
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
@@ -506,7 +527,7 @@ class ChargeTrainer(BaseTrainer):
         if self.config.get("dataset", None):
             self.train_dataset = registry.get_dataset_class(
                 self.config["task"]["dataset"]
-            )(self.config["dataset"], transform = None) #self.pga_train)
+            )(self.config["dataset"], transform = self.pga_train)
             self.train_sampler = self.get_sampler(
                 self.train_dataset,
                 self.config["optim"]["batch_size"],
@@ -520,7 +541,7 @@ class ChargeTrainer(BaseTrainer):
             if self.config.get("val_dataset", None):
                 self.val_dataset = registry.get_dataset_class(
                     self.config["task"]["dataset"]
-                )(self.config["val_dataset"], transform = None) #self.pga_val)
+                )(self.config["val_dataset"], transform = self.pga_val)
                 self.val_sampler = self.get_sampler(
                     self.val_dataset,
                     self.config["optim"].get(
@@ -536,7 +557,7 @@ class ChargeTrainer(BaseTrainer):
             if self.config.get("test_dataset", None):
                 self.test_dataset = registry.get_dataset_class(
                     self.config["task"]["dataset"]
-                )(self.config["test_dataset"], transform = None) #self.pga_test)
+                )(self.config["test_dataset"], transform = self.pga_test)
                 self.test_sampler = self.get_sampler(
                     self.test_dataset,
                     self.config["optim"].get(
