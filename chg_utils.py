@@ -465,7 +465,7 @@ class ProbeGraphAdder():
                 neigh_is_probe = neigh_atomic_species == 0
                 neigh_idx = neigh_idx[neigh_is_probe]
                 
-                # Negative sign must be added?
+                # Sign change required due to differing conventions in ASE and OCP 
                 neigh_offset = -neigh_offset[neigh_is_probe]
 
             atom_index = np.ones_like(neigh_idx) * i
