@@ -330,7 +330,8 @@ class ProbeGraphAdder():
                  slice_start = None,
                 num_probes = None,
                 mode = None,
-                stride = None):
+                stride = None,
+                use_tqdm = False):
         
         # Check if probe graph has been precomputed
         if hasattr(data_object, 'probe_data'):
@@ -382,8 +383,12 @@ class ProbeGraphAdder():
             probe_offsets = torch.Tensor([])
             atomic_numbers = data_object.atomic_numbers
             probe_pos = torch.Tensor([])
+            
+            loop = range(num_blocks)
+            if use_tqdm:
+                loop = tqdm(loop)
 
-            for i in range(num_blocks):
+            for i in loop:
                 if i == num_blocks - 1:
                     probe_choice = np.arange(i * num_probes,  total_probes, step = 1)
                 else:
@@ -459,7 +464,9 @@ class ProbeGraphAdder():
                 neigh_atomic_species = atomic_numbers[neigh_idx]
                 neigh_is_probe = neigh_atomic_species == 0
                 neigh_idx = neigh_idx[neigh_is_probe]
-                neigh_offset = neigh_offset[neigh_is_probe]
+                
+                # Negative sign must be added?
+                neigh_offset = -neigh_offset[neigh_is_probe]
 
             atom_index = np.ones_like(neigh_idx) * i
             edges = np.stack((atom_index, neigh_idx), axis = 1)
