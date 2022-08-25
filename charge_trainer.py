@@ -593,7 +593,7 @@ class ChargeEvaluator(Evaluator):
     def __init__(self, task = 'charge'):
         self.task = 'charge'
         
-        self.task_metrics['charge'] = ['charge_mse', 'charge_mae']
+        self.task_metrics['charge'] = ['charge_mse', 'charge_mae', 'charge_fe', 'true_density']
         self.task_attributes['charge'] = ['charge']
         self.task_primary_metric['charge'] = 'charge_mae'
         
@@ -612,10 +612,7 @@ class ChargeEvaluator(Evaluator):
             metrics = self.update(fn, res, metrics)
 
         return metrics
-
-def charge_mae(prediction, target):
-    return absolute_error(prediction['charge'], target['charge'])
-
+    
 def absolute_error(prediction, target):
     error = torch.abs(prediction - target)
     return {
@@ -624,14 +621,32 @@ def absolute_error(prediction, target):
         "numel": prediction.numel(),
     }
 
-
-def charge_mse(prediction, target):
-    return squared_error(prediction['charge'].float(), target['charge'].float())
-
 def squared_error(prediction, target):
     error = torch.abs(prediction - target) **2
     return {
         "metric": (torch.mean(error)).item(),
         "total": torch.sum(error).item(),
         "numel": prediction.numel(),
+    }
+
+def charge_mae(prediction, target):
+    return absolute_error(prediction['charge'], target['charge'])
+
+def charge_mse(prediction, target):
+    return squared_error(prediction['charge'].float(), target['charge'].float())
+
+# Fractional Error
+def charge_fe(prediction, target):
+    error = torch.abs(prediction['charge'] - target['charge']) / torch.sum(target['charge'])
+    return {
+        "metric": (torch.sum(error)).item(),
+        "total": (torch.sum(error)).item(),
+        "numel": prediction['charge'].numel(),
+    }
+
+def true_density(prediction, target):
+    return {
+        "metric": torch.mean(target['charge']).item(),
+        "total": torch.sum(target['charge']).item(),
+        "numel": target['charge'].numel(),
     }
