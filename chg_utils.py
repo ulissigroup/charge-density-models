@@ -356,6 +356,7 @@ class ProbeGraphAdder():
         density = np.array(data_object.charge_density)
         
         if stride != 1:
+            assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
         
         grid_pos = _calculate_grid_pos(density, [0,0,0], data_object.cell)
