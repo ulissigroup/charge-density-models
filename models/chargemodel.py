@@ -9,6 +9,7 @@ from pymatgen.io.ase import AseAtomsAdaptor
 import numpy as np
 import pdb
 from tqdm import tqdm
+from torch_geometric.utils import remove_isolated_nodes
 
 @registry.register_model("charge_model")
 class ChargeModel(torch.nn.Module):
@@ -20,6 +21,7 @@ class ChargeModel(torch.nn.Module):
         atom_channels = 128,
         probe_channels = 128,
         include_atomic_edges = False,
+        enforce_zero_for_disconnected_probes = False,
         name = 'charge_model',
     ):
         super().__init__()
@@ -63,7 +65,7 @@ class ChargeModel(torch.nn.Module):
         assert hasattr(data, 'probe_data')
         
         atom_representations = self.forward_atomic(data)
-    
+
         probes = self.forward_probe(data.probe_data, atom_representations)
         
         return probes
@@ -85,11 +87,16 @@ class ChargeModel(torch.nn.Module):
     def forward_probe(self, data, atom_representations):
         
         data.atom_representations = atom_representations
-        probe_results = self.probe_message_model(data)
-        probe_results = self.probe_output_function(probe_results).flatten()
+        probe_representations = self.probe_message_model(data)
+        probe_results = self.probe_output_function(probe_representations).flatten()
+        
+        if enforce_zero_for_disconnected_probes:
+            is_probe = data.atomic_numbers == 0
+            _, _, is_not_isolated = remove_isolated_nodes(data.edge_index, num_nodes = len(data.atomic_numbers))
+            is_isolated = ~is_not_isolated
+            probe_results[is_isolated[is_probe]] = torch.zeros_like(probe_results[is_isolated[is_probe]])
         
         return probe_results
-        
 '''        
 @registry.register_model("dummy_probe")
 class dummy(torch.nn.Module):
