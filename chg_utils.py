@@ -286,9 +286,6 @@ def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, include_pro
         
         if stride != 1:
             dens = dens[::stride, ::stride, ::stride]
-        
-        #atoms = ase.io.read(os.path.join(inpath, directory, 'OUTCAR'))
-        #dens = charge_density(os.path.join(inpath, directory, 'CHGCAR'))
 
         data_object = a2g.convert(atoms)
         data_object.charge_density = dens

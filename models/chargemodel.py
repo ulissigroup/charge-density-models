@@ -1,5 +1,4 @@
 import torch
-#from chg_utils import get_probe_graph
 from ocpmodels.common.utils import conditional_grad
 from ocpmodels.common.registry import registry
 from ocpmodels.datasets import data_list_collater
@@ -26,6 +25,7 @@ class ChargeModel(torch.nn.Module):
     ):
         super().__init__()
         self.regress_forces = False
+        self.enforce_zero_for_disconnected_probes = enforce_zero_for_disconnected_probes
         
         self.probe_output_function = torch.nn.Sequential(
             torch.nn.Linear(probe_channels, probe_channels),
@@ -90,28 +90,10 @@ class ChargeModel(torch.nn.Module):
         probe_representations = self.probe_message_model(data)
         probe_results = self.probe_output_function(probe_representations).flatten()
         
-        if enforce_zero_for_disconnected_probes:
+        if self.enforce_zero_for_disconnected_probes:
             is_probe = data.atomic_numbers == 0
             _, _, is_not_isolated = remove_isolated_nodes(data.edge_index, num_nodes = len(data.atomic_numbers))
             is_isolated = ~is_not_isolated
             probe_results[is_isolated[is_probe]] = torch.zeros_like(probe_results[is_isolated[is_probe]])
         
         return probe_results
-'''        
-@registry.register_model("dummy_probe")
-class dummy(torch.nn.Module):
-    def __init__(
-        self,
-        name = 'Dummy',
-        atomic = False,
-        probe = True,
-        **kwargs,
-    ):
-        super().__init__()
-        self.b = torch.nn.parameter.Parameter(torch.Tensor([1]))
-        
-    def forward(self, data, atom_representations):
-        out = torch.ones(data.input_dict['probe_target'].shape).to(data.input_dict['probe_target'].device)
-        out = torch.mul(out, self.b)
-        return out
-'''

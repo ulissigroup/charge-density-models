@@ -58,16 +58,6 @@ class schnet_charge(SchNet):
         pos = data.pos
         batch = data.batch
 
-        '''
-        if self.otf_graph:
-            edge_index, cell_offsets, neighbors = radius_graph_pbc(
-                data, self.cutoff, 50
-            )
-            data.edge_index = edge_index
-            data.cell_offsets = cell_offsets
-            data.neighbors = neighbors
-            '''
-
         # TODO return distance computation in radius_graph_pbc to remove need
         # for get_pbc_distances call
         if self.use_pbc:
