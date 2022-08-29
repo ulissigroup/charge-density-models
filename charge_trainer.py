@@ -593,7 +593,7 @@ class ChargeEvaluator(Evaluator):
     def __init__(self, task = 'charge'):
         self.task = 'charge'
         
-        self.task_metrics['charge'] = ['charge_mse', 'charge_mae', 'charge_fe', 'true_density']
+        self.task_metrics['charge'] = ['charge_mse', 'charge_mae', 'charge_fe', 'true_density', 'total_charge_ratio']
         self.task_attributes['charge'] = ['charge']
         self.task_primary_metric['charge'] = 'charge_mae'
         
@@ -642,6 +642,14 @@ def charge_fe(prediction, target):
         "metric": (torch.sum(error)).item(),
         "total": (torch.sum(error)).item(),
         "numel": prediction['charge'].numel(),
+    }
+
+def total_charge_ratio(prediction, target):
+    error = torch.sum(prediction['charge']) / torch.sum(target['charge'])
+    return {
+        "metric": torch.mean(error).item(),
+        "total": torch.sum(error).item(),
+        "numel": error.numel()
     }
 
 def true_density(prediction, target):
