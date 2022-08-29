@@ -315,6 +315,7 @@ class ProbeGraphAdder():
                  mode = 'random', 
                  slice_start = 0,
                  stride = 1,
+                 implementation = 'RGPBC',
                 ):
         self.num_probes = num_probes
         self.cutoff = cutoff
@@ -322,6 +323,7 @@ class ProbeGraphAdder():
         self.mode = mode
         self.slice_start = slice_start
         self.stride = stride
+        self.implementation = implementation
         
     def __call__(self, data_object, 
                  slice_start = None,
@@ -449,30 +451,16 @@ class ProbeGraphAdder():
         atoms_with_probes.extend(probe_atoms)
         atomic_numbers = atoms_with_probes.get_atomic_numbers()
         
-        # probe_data.edge_index
-        probe_edges = []
-        probe_offsets = []
+        if self.implementation == 'ASE':
+            neighborlist = AseNeighborListWrapper(self.cutoff, atoms_with_probes)
         
-        neighborlist = AseNeighborListWrapper(self.cutoff, atoms_with_probes)
+        elif self.implementation == 'RGPBC':
+            neighborlist = RadiusGraphPBCWrapper(self.cutoff, atoms_with_probes)
+            
+        else:
+            raise NotImplementedError('Unsupported implemnetation. Please choose from: ASE, RGPBC')
         
-        results = [neighborlist.get_neighbors(i, self.cutoff) for i in range(len(atoms))]
-        
-        for i, (neigh_idx, neigh_offset) in enumerate(results):
-            if not include_atomic_edges:
-                neigh_atomic_species = atomic_numbers[neigh_idx]
-                neigh_is_probe = neigh_atomic_species == 0
-                neigh_idx = neigh_idx[neigh_is_probe]
-                
-                # Sign change required due to differing conventions in ASE and OCP 
-                neigh_offset = -neigh_offset[neigh_is_probe]
-
-            atom_index = np.ones_like(neigh_idx) * i
-            edges = np.stack((atom_index, neigh_idx), axis = 1)
-            probe_edges.append(edges)
-            probe_offsets.append(neigh_offset)
-        
-        edge_index = torch.tensor(np.concatenate(probe_edges, axis=0)).T
-        cell_offsets = torch.tensor(np.concatenate(probe_offsets, axis=0))
+        edge_index, cell_offsets = neighborlist.get_all_neighbors(self.cutoff, include_atomic_edges)
         
         return edge_index, cell_offsets, atomic_numbers, torch.tensor(probe_pos)
     
@@ -494,15 +482,156 @@ class AseNeighborListWrapper:
         self.cutoff = cutoff
         self.atoms_positions = atoms.get_positions()
         self.atoms_cell = atoms.get_cell()
+        
+        is_probe = atoms.get_atomic_numbers() == 0
+        self.num_atoms = len(atoms.get_positions()[~is_probe])
+        self.atomic_numbers = atoms.get_atomic_numbers()
 
     def get_neighbors(self, i, cutoff):
         assert (
             cutoff == self.cutoff
         ), "Cutoff must be the same as used to initialise the neighborlist"
-
+        
         indices, offsets = self.neighborlist.get_neighbors(i)
         
+        # Sign change required due to differing conventions in ASE and OCP 
+        offsets = -offsets
+        
         return indices, offsets
+    
+    def get_all_neighbors(self, cutoff, include_atomic_edges):
+        probe_edges = []
+        probe_offsets = []
+        results = [self.neighborlist.get_neighbors(i) for i in range(self.num_atoms)]
+        
+        for i, (neigh_idx, neigh_offset) in enumerate(results):
+            if not include_atomic_edges:
+                neigh_atomic_species = self.atomic_numbers[neigh_idx]
+                neigh_is_probe = neigh_atomic_species == 0
+                neigh_idx = neigh_idx[neigh_is_probe]
+                neigh_offset = neigh_offset[neigh_is_probe]
+            
+            atom_index = np.ones_like(neigh_idx) * i
+            edges = np.stack((atom_index, neigh_idx), axis = 1)
+            probe_edges.append(edges)
+            probe_offsets.append(neigh_offset)
+        
+        edge_index = torch.tensor(np.concatenate(probe_edges, axis=0)).T
+        cell_offsets = torch.tensor(np.concatenate(probe_offsets, axis=0))
+        
+        return edge_index, cell_offsets
+    
+class RadiusGraphPBCWrapper:
+    """
+    Wraps a modified version of the neighbor-finding algorithm from ocp
+    (ocp.ocpmodels.common.utils.radius_graph_pbc)
+    The modifications restrict the neighbor-finding to atom-probe edges,
+    which is more efficient for our purposes.
+    """
+    def __init__(self, radius, atoms):
+        self.cutoff = radius
+        
+        is_probe = atoms.get_atomic_numbers() == 0
+        
+        atom_pos = atoms.get_positions()[~is_probe]
+        probe_pos = atoms.get_positions()[is_probe]
+        cell = torch.unsqueeze(torch.FloatTensor(np.array(atoms.get_cell())), 0)
+        batch_size = 1
+        
+        num_atoms = len(atom_pos)
+        num_probes = len(probe_pos)
+        num_total = num_atoms + num_probes
+        num_combos = num_atoms * num_probes
+        
+        indices = np.arange(0, num_total, 1)
+        
+        index1 = torch.FloatTensor(np.repeat(indices[~is_probe], repeats=num_probes))
+        index2 = torch.FloatTensor(np.tile(indices[is_probe], reps = num_atoms))
+        
+        pos1 = torch.unsqueeze(torch.FloatTensor(np.repeat(atom_pos, repeats = num_probes, axis = 0)), 0)
+        pos2 = torch.unsqueeze(torch.FloatTensor(np.tile(probe_pos, (num_atoms, 1))), 0)
+        
+        cross_a2a3 = torch.cross(cell[:, 1], cell[:, 2], dim=-1)
+        cell_vol = torch.sum(cell[:, 0] * cross_a2a3, dim=-1, keepdim=True)
+        inv_min_dist_a1 = torch.norm(cross_a2a3 / cell_vol, p=2, dim=-1)
+        rep_a1 = torch.ceil(radius * inv_min_dist_a1)
+        
+        cross_a3a1 = torch.cross(cell[:, 2], cell[:, 0], dim=-1)
+        inv_min_dist_a2 = torch.norm(cross_a3a1 / cell_vol, p=2, dim=-1)
+        rep_a2 = torch.ceil(radius * inv_min_dist_a2)
+        
+        if radius >= 20:
+            # Cutoff larger than the vacuum layer of 20A
+            cross_a1a2 = torch.cross(cell[:, 0], cell[:, 1], dim=-1)
+            inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
+            rep_a3 = torch.ceil(radius * inv_min_dist_a3)
+        else:
+            rep_a3 = cell.new_zeros(1)
+        # Take the max over all images for uniformity. This is essentially padding.
+        # Note that this can significantly increase the number of computed distances
+        # if the required repetitions are very different between images
+        # (which they usually are). Changing this to sparse (scatter) operations
+        # might be worth the effort if this function becomes a bottleneck.
+        max_rep = [rep_a1.max(), rep_a2.max(), rep_a3.max()]
+        
+        # Tensor of unit cells
+        cells_per_dim = [
+            torch.arange(-rep, rep + 1, dtype=torch.float)
+            for rep in max_rep
+        ]
+        unit_cell = torch.cat(torch.meshgrid(cells_per_dim, indexing = 'ij'), dim=-1).reshape(-1, 3)
+        
+        num_cells = len(unit_cell)
+        unit_cell_per_atom = unit_cell.view(1, num_cells, 3).repeat(
+            len(index2), 1, 1
+        )
+        unit_cell = torch.transpose(unit_cell, 0, 1)
+        unit_cell_batch = unit_cell.view(1, 3, num_cells).expand(
+            batch_size, -1, -1
+        )
+
+        # Compute the x, y, z positional offsets for each cell in each image
+        data_cell = torch.transpose(cell, 1, 2)
+        pbc_offsets = torch.bmm(data_cell, unit_cell_batch)
+        pbc_offsets_per_atom = torch.repeat_interleave(
+            pbc_offsets, num_combos, dim=0
+        )
+
+        # Expand the positions and indices for the 9 cells
+        pos1 = pos1.view(-1, 3, 1).expand(-1, -1, num_cells)
+        pos2 = pos2.view(-1, 3, 1).expand(-1, -1, num_cells)
+        index1 = index1.view(-1, 1).repeat(1, num_cells).view(-1)
+        index2 = index2.view(-1, 1).repeat(1, num_cells).view(-1)
+        # Add the PBC offsets for the second atom
+        pos2 = pos2 + pbc_offsets_per_atom
+
+        # Compute the squared distance between atoms
+        atom_distance_sqr = torch.sum((pos1 - pos2) ** 2, dim=1)
+        atom_distance_sqr = atom_distance_sqr.view(-1)
+
+        # Remove pairs that are too far apart
+        mask_within_radius = torch.le(atom_distance_sqr, radius * radius)
+        # Remove pairs with the same atoms (distance = 0.0)
+        mask_not_same = torch.gt(atom_distance_sqr, 0.0001)
+        mask = torch.logical_and(mask_within_radius, mask_not_same)
+        index1 = torch.masked_select(index1, mask)
+        index2 = torch.masked_select(index2, mask)
+        
+        unit_cell = torch.masked_select(
+            unit_cell_per_atom.view(-1, 3), mask.view(-1, 1).expand(-1, 3)
+        )
+        unit_cell = unit_cell.view(-1, 3)
+        atom_distance_sqr = torch.masked_select(atom_distance_sqr, mask)
+
+        self.edge_index = torch.stack((index1, index2))
+        self.offsets = unit_cell
+        
+    def get_all_neighbors(self, cutoff, include_atomic_edges = False):
+        assert (
+            cutoff == self.cutoff
+        ), "Cutoff must be the same as used to initialise the neighborlist"
+        
+        return self.edge_index.int(), self.offsets
     
 def _calculate_grid_pos(density, origin, cell):
     """
