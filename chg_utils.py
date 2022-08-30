@@ -624,7 +624,9 @@ class RadiusGraphPBCWrapper:
         atom_distance_sqr = torch.masked_select(atom_distance_sqr, mask)
 
         self.edge_index = torch.stack((index1, index2))
-        self.offsets = unit_cell
+        
+        # Fix offset direction
+        self.offsets = -unit_cell
         
     def get_all_neighbors(self, cutoff, include_atomic_edges = False):
         assert (
