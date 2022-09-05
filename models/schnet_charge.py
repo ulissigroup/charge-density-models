@@ -6,8 +6,6 @@ LICENSE file in the root directory of this source tree.
 from ocpmodels.common.registry import registry
 import torch
 from ocpmodels.models.schnet import SchNetWrap as SchNet
-from torch_scatter import scatter
-import numpy as np
 
 from ocpmodels.common.utils import (
     conditional_grad,
@@ -22,14 +20,16 @@ class schnet_charge(SchNet):
     def __init__(
         self,
         use_pbc=True,
-        regress_forces=True,
+        regress_forces=False,
         otf_graph=False,
+        
         hidden_channels=128,
         num_filters=128,
         num_interactions=6,
         num_gaussians=50,
         cutoff=10.0,
         readout="add",
+        
         atomic=False,
         probe=False,
         name='schnet_charge',
@@ -57,22 +57,19 @@ class schnet_charge(SchNet):
         z = data.atomic_numbers.long()
         pos = data.pos
         batch = data.batch
+        
+        (
+            edge_index,
+            edge_weight,
+            distance_vec,
+            cell_offsets,
+            neighbors,
+        ) = self.generate_graph(data)
 
-        # TODO return distance computation in radius_graph_pbc to remove need
-        # for get_pbc_distances call
         if self.use_pbc:
             assert z.dim() == 1 and z.dtype == torch.long
-            out = get_pbc_distances(
-                pos,
-                data.edge_index,
-                data.cell,
-                data.cell_offsets,
-                data.neighbors,
-            )
             
-            edge_index = out["edge_index"]
-            edge_weight = out["distances"]
-            edge_attr = self.distance_expansion(edge_weight)
+        edge_attr = self.distance_expansion(edge_weight)
             
         h = self.embedding(z)
 
