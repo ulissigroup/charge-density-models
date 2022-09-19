@@ -358,7 +358,7 @@ class ProbeGraphAdder():
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
 
-        grid_pos = _calculate_grid_pos(density, [0,0,0], data_object.cell)
+        grid_pos = _calculate_grid_pos(density, data_object.cell)
 
         if mode == 'random':
             probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = num_probes)
@@ -446,7 +446,6 @@ class ProbeGraphAdder():
         Large portions from DeepDFT
         """
         probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
-
 
         probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
         atoms_with_probes = atoms.copy()
@@ -635,7 +634,7 @@ class RadiusGraphPBCWrapper:
         
         return self.edge_index.int(), self.offsets
     
-def _calculate_grid_pos(density, origin, cell):
+def _calculate_grid_pos(density, cell):
     """
     From DeepDFT
     """
@@ -649,5 +648,4 @@ def _calculate_grid_pos(density, origin, cell):
     )
     grid_pos = np.stack(grid_pos, 3)
     grid_pos = np.dot(grid_pos, cell)
-    grid_pos = grid_pos + origin
     return grid_pos
