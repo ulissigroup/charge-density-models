@@ -23,7 +23,7 @@ class charge_density:
 
         if self.spin_polarized == True:
             raise NotImplementedError
-        
+
         self.atoms = []
         
         if inpath == None:
@@ -334,7 +334,7 @@ class ProbeGraphAdder():
         
         # Check if probe graph has been precomputed
         if hasattr(data_object, 'probe_data'):
-            if hasattr(data_object.probe_data, edge_index) and hasattr(data_object.probe_data, cell_offsets):
+            if hasattr(data_object.probe_data, 'edge_index') and hasattr(data_object.probe_data, 'cell_offsets'):
                 return data_object
         
         if slice_start is None:
@@ -351,23 +351,24 @@ class ProbeGraphAdder():
                       positions = data_object.pos.cpu().detach().numpy(),
                       cell = data_object.cell.cpu().detach().numpy()[0],
                       pbc = [True, True, True])
-        
+
         density = np.array(data_object.charge_density)
         
         if stride != 1:
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
-        
+
         grid_pos = _calculate_grid_pos(density, [0,0,0], data_object.cell)
-        
+
         if mode == 'random':
             probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = num_probes)
             probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+
             probe_edges, probe_offsets, atomic_numbers, probe_pos = self.get_edges_from_choice(probe_choice, 
                                                                                                grid_pos, 
                                                                                                atoms,
                                                                                                self.include_atomic_edges)
-            
+
         if mode == 'slice':
             probe_choice = np.arange(slice_start, slice_start + num_probes, step=1)
             probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
@@ -437,20 +438,21 @@ class ProbeGraphAdder():
         
         
         data_object.probe_data = probe_data
+
         return data_object
         
     def get_edges_from_choice(self, probe_choice, grid_pos, atoms, include_atomic_edges):
         """
         Large portions from DeepDFT
         """
-        
         probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
-        
+
+
         probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
         atoms_with_probes = atoms.copy()
         atoms_with_probes.extend(probe_atoms)
         atomic_numbers = atoms_with_probes.get_atomic_numbers()
-        
+
         if self.implementation == 'ASE':
             neighborlist = AseNeighborListWrapper(self.cutoff, atoms_with_probes)
         
@@ -461,7 +463,7 @@ class ProbeGraphAdder():
             raise NotImplementedError('Unsupported implemnetation. Please choose from: ASE, RGPBC')
         
         edge_index, cell_offsets = neighborlist.get_all_neighbors(self.cutoff, include_atomic_edges)
-        
+
         return edge_index, cell_offsets, atomic_numbers, torch.tensor(probe_pos)
     
 class AseNeighborListWrapper:
@@ -544,13 +546,14 @@ class RadiusGraphPBCWrapper:
         num_combos = num_atoms * num_probes
         
         indices = np.arange(0, num_total, 1)
-        
+
         index1 = torch.FloatTensor(np.repeat(indices[~is_probe], repeats=num_probes))
         index2 = torch.FloatTensor(np.tile(indices[is_probe], reps = num_atoms))
-        
+
+
         pos1 = torch.unsqueeze(torch.FloatTensor(np.repeat(atom_pos, repeats = num_probes, axis = 0)), 0)
         pos2 = torch.unsqueeze(torch.FloatTensor(np.tile(probe_pos, (num_atoms, 1))), 0)
-        
+
         cross_a2a3 = torch.cross(cell[:, 1], cell[:, 2], dim=-1)
         cell_vol = torch.sum(cell[:, 0] * cross_a2a3, dim=-1, keepdim=True)
         inv_min_dist_a1 = torch.norm(cross_a2a3 / cell_vol, p=2, dim=-1)
@@ -559,14 +562,11 @@ class RadiusGraphPBCWrapper:
         cross_a3a1 = torch.cross(cell[:, 2], cell[:, 0], dim=-1)
         inv_min_dist_a2 = torch.norm(cross_a3a1 / cell_vol, p=2, dim=-1)
         rep_a2 = torch.ceil(radius * inv_min_dist_a2)
-        
-        if radius >= 20:
-            # Cutoff larger than the vacuum layer of 20A
-            cross_a1a2 = torch.cross(cell[:, 0], cell[:, 1], dim=-1)
-            inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
-            rep_a3 = torch.ceil(radius * inv_min_dist_a3)
-        else:
-            rep_a3 = cell.new_zeros(1)
+
+        cross_a1a2 = torch.cross(cell[:, 0], cell[:, 1], dim=-1)
+        inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
+        rep_a3 = torch.ceil(radius * inv_min_dist_a3)
+
         # Take the max over all images for uniformity. This is essentially padding.
         # Note that this can significantly increase the number of computed distances
         # if the required repetitions are very different between images
@@ -579,7 +579,7 @@ class RadiusGraphPBCWrapper:
             torch.arange(-rep, rep + 1, dtype=torch.float)
             for rep in max_rep
         ]
-        unit_cell = torch.cat(torch.meshgrid(cells_per_dim, indexing = 'ij'), dim=-1).reshape(-1, 3)
+        unit_cell = torch.cartesian_prod(*cells_per_dim)
         
         num_cells = len(unit_cell)
         unit_cell_per_atom = unit_cell.view(1, num_cells, 3).repeat(

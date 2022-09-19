@@ -63,6 +63,7 @@ class schnet_charge(SchNet):
             edge_weight,
             distance_vec,
             cell_offsets,
+            _,  # cell offset distances
             neighbors,
         ) = self.generate_graph(data)
 
