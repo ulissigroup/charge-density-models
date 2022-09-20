@@ -132,7 +132,7 @@ class ProbeGraphAdder():
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
 
-        grid_pos = _calculate_grid_pos(density, data_object.cell)
+        grid_pos = calculate_grid_pos(density.shape, data_object.cell)
 
         if mode == 'random':
             probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = num_probes)
@@ -288,7 +288,7 @@ class RadiusGraphPBCWrapper:
     The modifications restrict the neighbor-finding to atom-probe edges,
     which is more efficient for our purposes.
     """
-    def __init__(self, radius, atoms):
+    def __init__(self, radius, atoms, pbc = [True, True, False]):
         self.cutoff = radius
         
         is_probe = atoms.get_atomic_numbers() == 0
@@ -308,22 +308,31 @@ class RadiusGraphPBCWrapper:
         index1 = torch.FloatTensor(np.repeat(indices[~is_probe], repeats=num_probes))
         index2 = torch.FloatTensor(np.tile(indices[is_probe], reps = num_atoms))
 
-
         pos1 = torch.unsqueeze(torch.FloatTensor(np.repeat(atom_pos, repeats = num_probes, axis = 0)), 0)
         pos2 = torch.unsqueeze(torch.FloatTensor(np.tile(probe_pos, (num_atoms, 1))), 0)
 
         cross_a2a3 = torch.cross(cell[:, 1], cell[:, 2], dim=-1)
         cell_vol = torch.sum(cell[:, 0] * cross_a2a3, dim=-1, keepdim=True)
-        inv_min_dist_a1 = torch.norm(cross_a2a3 / cell_vol, p=2, dim=-1)
-        rep_a1 = torch.ceil(radius * inv_min_dist_a1)
         
-        cross_a3a1 = torch.cross(cell[:, 2], cell[:, 0], dim=-1)
-        inv_min_dist_a2 = torch.norm(cross_a3a1 / cell_vol, p=2, dim=-1)
-        rep_a2 = torch.ceil(radius * inv_min_dist_a2)
-
-        cross_a1a2 = torch.cross(cell[:, 0], cell[:, 1], dim=-1)
-        inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
-        rep_a3 = torch.ceil(radius * inv_min_dist_a3)
+        if pbc[0]:
+            inv_min_dist_a1 = torch.norm(cross_a2a3 / cell_vol, p=2, dim=-1)
+            rep_a1 = torch.ceil(radius * inv_min_dist_a1)
+        else:
+            rep_a1 = data.cell.new_zeros(1)
+        
+        if pbc[1]:
+            cross_a3a1 = torch.cross(cell[:, 2], cell[:, 0], dim=-1)
+            inv_min_dist_a2 = torch.norm(cross_a3a1 / cell_vol, p=2, dim=-1)
+            rep_a2 = torch.ceil(radius * inv_min_dist_a2)
+        else:
+            rep_a2 = data.cell.new_zeros(1)
+        
+        if pbc[2]:
+            cross_a1a2 = torch.cross(cell[:, 0], cell[:, 1], dim=-1)
+            inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
+            rep_a3 = torch.ceil(radius * inv_min_dist_a3)
+        else:
+            rep_a3 = data.cell.new_zeros(1)
 
         # Take the max over all images for uniformity. This is essentially padding.
         # Note that this can significantly increase the number of computed distances
@@ -369,6 +378,7 @@ class RadiusGraphPBCWrapper:
 
         # Remove pairs that are too far apart
         mask_within_radius = torch.le(atom_distance_sqr, radius * radius)
+        
         # Remove pairs with the same atoms (distance = 0.0)
         mask_not_same = torch.gt(atom_distance_sqr, 0.0001)
         mask = torch.logical_and(mask_within_radius, mask_not_same)
@@ -393,16 +403,16 @@ class RadiusGraphPBCWrapper:
         
         return self.edge_index.int(), self.offsets
     
-def _calculate_grid_pos(density, cell):
+def calculate_grid_pos(shape, cell):
     """
     From DeepDFT
     """
     # Calculate grid positions
-    ngridpts = np.array(density.shape)  # grid matrix
+    ngridpts = np.array(shape)  # grid matrix
     grid_pos = np.meshgrid(
-        np.arange(ngridpts[0]) / density.shape[0],
-        np.arange(ngridpts[1]) / density.shape[1],
-        np.arange(ngridpts[2]) / density.shape[2],
+        np.arange(ngridpts[0]) / shape[0],
+        np.arange(ngridpts[1]) / shape[1],
+        np.arange(ngridpts[2]) / shape[2],
         indexing="ij",
     )
     grid_pos = np.stack(grid_pos, 3)
