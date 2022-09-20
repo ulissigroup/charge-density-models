@@ -3,3 +3,6 @@ checkpoints/
 logs/
 __pycache__/
 cdm/__pycache__/
+wandb/
+.ipynb_checkpoints/
+*.egg-info/

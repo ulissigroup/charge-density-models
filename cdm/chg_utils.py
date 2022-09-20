@@ -17,7 +17,7 @@ import pdb
 import time
 from tqdm import tqdm
 
-def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, probe_graph_adder = None, stride = 1):
+def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, probe_graph_adder = None, stride = 1, cutoff = 6):
     '''
     A function used to build LMDB datasets from a directory of VASP calculations
     Supports pre-computation of probe graphs by passing in a ProbeGraphAdder object
