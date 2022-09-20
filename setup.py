@@ -1,7 +1,7 @@
 from setuptools import find_packages, setup
 
 setup(
-    name="cdm",
+    name="charge-density-models",
     version="0.0.0",
     description="Tools to build charge density models using ocpmodels",
     url="https://github.com/ulissigroup/charge-density-models",
