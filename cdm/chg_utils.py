@@ -318,21 +318,21 @@ class RadiusGraphPBCWrapper:
             inv_min_dist_a1 = torch.norm(cross_a2a3 / cell_vol, p=2, dim=-1)
             rep_a1 = torch.ceil(radius * inv_min_dist_a1)
         else:
-            rep_a1 = data.cell.new_zeros(1)
+            rep_a1 = cell.new_zeros(1)
         
         if pbc[1]:
             cross_a3a1 = torch.cross(cell[:, 2], cell[:, 0], dim=-1)
             inv_min_dist_a2 = torch.norm(cross_a3a1 / cell_vol, p=2, dim=-1)
             rep_a2 = torch.ceil(radius * inv_min_dist_a2)
         else:
-            rep_a2 = data.cell.new_zeros(1)
+            rep_a2 = cell.new_zeros(1)
         
         if pbc[2]:
             cross_a1a2 = torch.cross(cell[:, 0], cell[:, 1], dim=-1)
             inv_min_dist_a3 = torch.norm(cross_a1a2 / cell_vol, p=2, dim=-1)
             rep_a3 = torch.ceil(radius * inv_min_dist_a3)
         else:
-            rep_a3 = data.cell.new_zeros(1)
+            rep_a3 = cell.new_zeros(1)
 
         # Take the max over all images for uniformity. This is essentially padding.
         # Note that this can significantly increase the number of computed distances

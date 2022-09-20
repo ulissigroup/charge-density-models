@@ -22,7 +22,7 @@ from ocpmodels.common.data_parallel import (
 from ocpmodels.modules.loss import AtomwiseL2Loss, DDPLoss, L2MAELoss
 from ocpmodels.modules.evaluator import *
 
-from chg_utils import ProbeGraphAdder
+from cdm.chg_utils import ProbeGraphAdder
 from torch_geometric.data import Batch
 
 import pdb

@@ -1,0 +1,5 @@
+runs/
+checkpoints/
+logs/
+__pycache__/
+cdm/__pycache__/
