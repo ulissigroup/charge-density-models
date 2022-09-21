@@ -1,4 +1,5 @@
 import torch
+import os
 
 from ase.calculators.vasp import VaspChargeDensity
 
@@ -55,7 +56,9 @@ def test_calculate_grid_pos():
     
     
 def test_get_edges_from_choice():
-    vcd = VaspChargeDensity('test_structure')
+    vcd = VaspChargeDensity(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_structure")
+    )
     
     atoms = vcd.atoms[0]
     dens = vcd.chg[0]
