@@ -6,3 +6,4 @@ cdm/__pycache__/
 wandb/
 .ipynb_checkpoints/
 *.egg-info/
+dev/

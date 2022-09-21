@@ -138,18 +138,29 @@ class ProbeGraphAdder():
             probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = num_probes)
             probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
 
-            probe_edges, probe_offsets, atomic_numbers, probe_pos = self.get_edges_from_choice(probe_choice, 
-                                                                                               grid_pos, 
-                                                                                               atoms,
-                                                                                               self.include_atomic_edges)
+            out = get_edges_from_choice(
+                probe_choice, 
+                grid_pos, 
+                atoms, 
+                self.cutoff, 
+                self.include_atomic_edges,
+                self.implementation,
+            )
+            probe_edges, probe_offsets, atomic_numbers, probe_pos = out
 
         if mode == 'slice':
             probe_choice = np.arange(slice_start, slice_start + num_probes, step=1)
             probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
-            probe_edges, probe_offsets, atomic_numbers, probe_pos = self.get_edges_from_choice(probe_choice,
-                                                                                               grid_pos,
-                                                                                               atoms,
-                                                                                               self.include_atomic_edges)
+            out = get_edges_from_choice(
+                probe_choice, 
+                grid_pos, 
+                atoms, 
+                self.cutoff, 
+                self.include_atomic_edges,
+                self.implementation,
+            )
+            probe_edges, probe_offsets, atomic_numbers, probe_pos = out
+            
         if mode == 'all':
             total_probes = np.prod(density.shape)
             num_blocks = int(np.ceil(total_probes / num_probes))
@@ -170,10 +181,16 @@ class ProbeGraphAdder():
                     probe_choice = np.arange(i * num_probes, (i+1)*num_probes, step = 1)
                     
                 probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
-                new_edges, new_offsets, new_atomic_numbers, new_pos = self.get_edges_from_choice(probe_choice, 
-                                                                                                 grid_pos, 
-                                                                                                 atoms,
-                                                                                                 self.include_atomic_edges)
+                out = get_edges_from_choice(
+                    probe_choice, 
+                    grid_pos, 
+                    atoms, 
+                    self.cutoff, 
+                    self.include_atomic_edges,
+                    self.implementation,
+                )
+            
+                new_edges, new_offsets, new_atomic_numbers, new_pos = out
                 
                 new_edges[1] += i*num_probes
                 probe_edges = torch.cat((probe_edges, new_edges), dim=1)
@@ -198,31 +215,6 @@ class ProbeGraphAdder():
         data_object.probe_data = probe_data
 
         return data_object
-        
-    def get_edges_from_choice(self, probe_choice, grid_pos, atoms, include_atomic_edges):
-        """
-        Given a list of chosen probes, compute all edges between the probes and atoms.
-        Portions from DeepDFT
-        """
-        probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
-
-        probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
-        atoms_with_probes = atoms.copy()
-        atoms_with_probes.extend(probe_atoms)
-        atomic_numbers = atoms_with_probes.get_atomic_numbers()
-
-        if self.implementation == 'ASE':
-            neighborlist = AseNeighborListWrapper(self.cutoff, atoms_with_probes)
-        
-        elif self.implementation == 'RGPBC':
-            neighborlist = RadiusGraphPBCWrapper(self.cutoff, atoms_with_probes)
-            
-        else:
-            raise NotImplementedError('Unsupported implemnetation. Please choose from: ASE, RGPBC')
-        
-        edge_index, cell_offsets = neighborlist.get_all_neighbors(self.cutoff, include_atomic_edges)
-
-        return edge_index, cell_offsets, atomic_numbers, torch.tensor(probe_pos)
     
 class AseNeighborListWrapper:
     """
@@ -392,16 +384,15 @@ class RadiusGraphPBCWrapper:
         atom_distance_sqr = torch.masked_select(atom_distance_sqr, mask)
 
         self.edge_index = torch.stack((index1, index2))
-        
-        # Fix offset direction
-        self.offsets = -unit_cell
+
+        self.offsets = unit_cell
         
     def get_all_neighbors(self, cutoff, include_atomic_edges = False):
         assert (
             cutoff == self.cutoff
         ), "Cutoff must be the same as used to initialise the neighborlist"
         
-        return self.edge_index.int(), self.offsets
+        return self.edge_index.to(torch.int64), self.offsets
     
 def calculate_grid_pos(shape, cell):
     """
@@ -419,6 +410,32 @@ def calculate_grid_pos(shape, cell):
     grid_pos = np.dot(grid_pos, cell)
     return grid_pos
 
+def get_edges_from_choice(probe_choice, grid_pos, atoms, cutoff, include_atomic_edges, implementation):
+        """
+        Given a list of chosen probes, compute all edges between the probes and atoms.
+        Portions from DeepDFT
+        """
+        probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
+
+        probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
+        atoms_with_probes = atoms.copy()
+        atoms_with_probes.extend(probe_atoms)
+        atomic_numbers = atoms_with_probes.get_atomic_numbers()
+
+        if implementation == 'ASE':
+            neighborlist = AseNeighborListWrapper(cutoff, atoms_with_probes)
+        
+        elif implementation == 'RGPBC':
+            neighborlist = RadiusGraphPBCWrapper(cutoff, atoms_with_probes)
+            
+        else:
+            raise NotImplementedError('Unsupported implementation. Please choose from: ASE, RGPBC')
+        
+        edge_index, cell_offsets = neighborlist.get_all_neighbors(cutoff, include_atomic_edges)
+
+        return edge_index, cell_offsets, atomic_numbers, torch.tensor(probe_pos)
+
+    
 class charge_density:
     '''
     Class was formerly used to convert between CHGCAR and .cube formats
