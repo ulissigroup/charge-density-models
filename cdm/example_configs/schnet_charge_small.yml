@@ -1,0 +1,61 @@
+# Recommended command line arguments:
+# --identifier sample_config
+# --run-dir: runs/
+# --print-every 5
+# --seed: 2
+# --logger.name=wandb
+# --amp
+# --debug
+
+# Using this absolute import path will allow you to use the registry
+# for the model names
+trainer: cdm.charge_trainer.ChargeTrainer
+
+model:
+    name: charge_model
+    num_interactions: 5
+    atom_channels: 32
+    probe_channels: 32
+    enforce_zero_for_disconnected_probes: True
+    atom_model_config:
+        name: schnet_charge
+        num_filters: 16
+        num_gaussians: 16
+        cutoff: 4
+    probe_model_config:
+        name: schnet_charge
+        num_filters: 16
+        num_gaussians: 32
+        cutoff: 4
+        
+optim:
+    optimizer: Adam
+    batch_size: 2
+    eval_batch_size: 2
+    num_workers: 24
+    lr_initial: 0.00005
+    scheduler: ReduceLROnPlateau
+    mode: min
+    factor: 0.96
+    patience: 1
+    max_epochs: 1000
+    
+task:
+    dataset: lmdb
+    description: Training on charge density
+    type: regression
+    metric: charge_mse, charge_mae, charge_fe
+    primary_metric: charge_mae
+    labels: charge_vals
+    
+dataset:
+  - src: ../charge-data/1k-no-probe-graphs/train
+    normalize_labels: False
+  - src: ../charge-data/1k-no-probe-graphs/val
+  
+probe_graph_config:
+    train_probes: 200
+    val_probes: 200
+    test_probes: 200
+    cutoff: 4
+    include_atomic_edges: False
