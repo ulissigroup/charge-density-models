@@ -1,7 +1,13 @@
 import torch
 import os
 
+from ase.build import molecule
 from ase.calculators.vasp import VaspChargeDensity
+
+from ocpmodels.common.utils import radius_graph_pbc
+from ocpmodels.models.base import BaseModel
+from ocpmodels.preprocessing.atoms_to_graphs import AtomsToGraphs
+from ocpmodels.datasets import data_list_collater
 
 from cdm.chg_utils import *
 
@@ -110,11 +116,52 @@ def test_get_edges_from_choice():
     assert (out1[2] == out2[2]).all()
     assert (out1[3] == out2[3]).all()
     
+def test_end_to_end_graph_gen():
+    structure = molecule('H')
+    structure.cell = [[10, 0, 0],
+                      [0, 10, 0],
+                      [0, 0, 10]]
+
+    structure.positions = [[0, 9, 0]]
+    
+    a2g = AtomsToGraphs()
+    data = a2g.convert(structure)
+    data.charge_density = [[[0]]]
+    
+    pga = ProbeGraphAdder(num_probes = 1)
+    data = pga(data)
+    
+    model = BaseModel()
+    model.otf_graph = False
+
+    (
+        edge_index,
+        edge_weight,
+        distance_vec,
+        cell_offsets,
+        cell_offset_distances,
+        neighbors,
+    ) = model.generate_graph(
+        data_list_collater([data.probe_data]),
+        cutoff = 1000,
+        max_neighbors=100,
+        use_pbc = True,
+        otf_graph = False,
+    )
+    
+    if edge_weight.item() == 19:
+        print('Offsets are likely in the wrong direction!')
+    
+    assert edge_weight.item() == 1
+    
 if __name__ == "__main__":
     test_calculate_grid_pos()
     print('Pass: test_calculate_grid_pos')
     
     test_get_edges_from_choice()
-    print('Pass: get_edges_from_choice')
+    print('Pass: test_get_edges_from_choice')
+    
+    test_end_to_end_graph_gen()
+    print('Pass: test_end_to_end_graph_gen')
     
     

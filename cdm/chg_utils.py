@@ -208,7 +208,9 @@ class ProbeGraphAdder():
         probe_data.pos = torch.cat((data_object.pos, probe_pos))
         probe_data.target = torch.Tensor(density[probe_choice])
         probe_data.edge_index = probe_edges.long()
-        probe_data.cell_offsets = probe_offsets
+        
+        probe_data.cell_offsets = -probe_offsets
+        
         probe_data.neighbors = torch.LongTensor([probe_data.edge_index.shape[1]])
         
         # Add probe_data object to overall data object
@@ -245,9 +247,8 @@ class AseNeighborListWrapper:
         ), "Cutoff must be the same as used to initialise the neighborlist"
         
         indices, offsets = self.neighborlist.get_neighbors(i)
-        
-        # Sign change required due to differing conventions in ASE and OCP 
-        offsets = -offsets
+         
+        offsets = offsets
         
         return indices, offsets
     
@@ -269,6 +270,7 @@ class AseNeighborListWrapper:
             probe_offsets.append(neigh_offset)
         
         edge_index = torch.tensor(np.concatenate(probe_edges, axis=0)).T
+        
         cell_offsets = torch.tensor(np.concatenate(probe_offsets, axis=0))
         
         return edge_index, cell_offsets
