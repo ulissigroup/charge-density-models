@@ -1,5 +1,6 @@
 import torch
 import os
+import warnings
 
 from ase.build import molecule
 from ase.calculators.vasp import VaspChargeDensity
@@ -23,6 +24,48 @@ def old_calculate_grid_pos(shape, cell):
     grid_pos = np.dot(grid_pos, cell)
     
     return torch.tensor(grid_pos, dtype=torch.float)
+
+def end_to_end_graph_gen(device):
+    structure = molecule('H')
+    structure.cell = [[10, 0, 0],
+                      [0, 10, 0],
+                      [0, 0, 10]]
+    
+    cell = torch.tensor(np.array(structure.cell), dtype=torch.float)
+
+    structure.positions = [[0, 9, 0]]
+    
+    a2g = AtomsToGraphs()
+    data = a2g.convert(structure)
+    data.charge_density = [[[0]]]
+    
+    data.to(device)
+    
+    pga = ProbeGraphAdder(num_probes = 1)
+    data = pga(data)
+    
+    model = BaseModel()
+    model.otf_graph = False
+
+    (
+        edge_index,
+        edge_weight,
+        distance_vec,
+        cell_offsets,
+        cell_offset_distances,
+        neighbors,
+    ) = model.generate_graph(
+        data_list_collater([data.probe_data]),
+        cutoff = 1000,
+        max_neighbors=100,
+        use_pbc = True,
+        otf_graph = False,
+    )
+    
+    if edge_weight.item() == 19:
+        print('Offsets are likely in the wrong direction!')
+    
+    return edge_weight.item()
 
 def test_calculate_grid_pos():
     # Base case
@@ -89,8 +132,9 @@ def test_get_edges_from_choice():
     out1 = get_edges_from_choice(
         probe_choice, 
         grid_pos,
-        atoms, 
-        cutoff, 
+        atom_pos = torch.tensor(atoms.get_positions()), 
+        cell = cell, 
+        cutoff= cutoff, 
         include_atomic_edges = False, 
         implementation = 'ASE',
     )
@@ -98,8 +142,9 @@ def test_get_edges_from_choice():
     out2 = get_edges_from_choice(
         probe_choice, 
         grid_pos,
-        atoms, 
-        cutoff, 
+        atom_pos = torch.tensor(atoms.get_positions()), 
+        cell = cell,
+        cutoff = cutoff, 
         include_atomic_edges = False, 
         implementation = 'RGPBC',
     )
@@ -124,47 +169,16 @@ def test_get_edges_from_choice():
     assert features1 == features2
     
     assert (out1[2] == out2[2]).all()
-    assert (out1[3] == out2[3]).all()
     
-def test_end_to_end_graph_gen():
-    structure = molecule('H')
-    structure.cell = [[10, 0, 0],
-                      [0, 10, 0],
-                      [0, 0, 10]]
+def test_end_to_end_graph_gen_cpu():
+    assert end_to_end_graph_gen('cpu') == 1
     
-    cell = torch.tensor(np.array(structure.cell), dtype=torch.float, device = 'cuda')
-
-    structure.positions = [[0, 9, 0]]
-    
-    a2g = AtomsToGraphs()
-    data = a2g.convert(structure)
-    data.charge_density = [[[0]]]
-    
-    pga = ProbeGraphAdder(num_probes = 1)
-    data = pga(data)
-    
-    model = BaseModel()
-    model.otf_graph = False
-
-    (
-        edge_index,
-        edge_weight,
-        distance_vec,
-        cell_offsets,
-        cell_offset_distances,
-        neighbors,
-    ) = model.generate_graph(
-        data_list_collater([data.probe_data]),
-        cutoff = 1000,
-        max_neighbors=100,
-        use_pbc = True,
-        otf_graph = False,
-    )
-    
-    if edge_weight.item() == 19:
-        print('Offsets are likely in the wrong direction!')
-    
-    assert edge_weight.item() == 1
+def test_end_to_end_graph_gen_cuda():
+    if torch.cuda.is_available():
+        assert end_to_end_graph_gen('cuda') == 1
+    else:
+        warnings.warn('cannot test graph generation on cuda')
+        pass
     
 if __name__ == "__main__":
     test_calculate_grid_pos()
@@ -173,7 +187,10 @@ if __name__ == "__main__":
     test_get_edges_from_choice()
     print('Pass: test_get_edges_from_choice')
     
-    test_end_to_end_graph_gen()
-    print('Pass: test_end_to_end_graph_gen')
+    test_end_to_end_graph_gen_cpu()
+    print('Pass: test_end_to_end_graph_gen_cpu')
+    
+    test_end_to_end_graph_gen_cuda()
+    print('Pass: test_end_to_end_graph_gen_cuda')
     
     
