@@ -165,10 +165,10 @@ class ProbeGraphAdder():
             total_probes = np.prod(density.shape)
             num_blocks = int(np.ceil(total_probes / num_probes))
             
-            probe_edges = torch.Tensor([])
-            probe_offsets = torch.Tensor([])
-            atomic_numbers = data_object.atomic_numbers
-            probe_pos = torch.Tensor([])
+            probe_edges = torch.tensor([], device = data_object.edge_index.device)
+            probe_offsets = torch.tensor([], device = data_object.cell_offsets.device)
+            atomic_numbers = torch.clone(data_object.atomic_numbers.detach())
+            probe_pos = torch.tensor([], device = data_object.pos.device)
             
             loop = range(num_blocks)
             if use_tqdm:
@@ -190,7 +190,7 @@ class ProbeGraphAdder():
                     include_atomic_edges = self.include_atomic_edges,
                     implementation = self.implementation,
                 )
-                probe_edges, probe_offsets, probe_pos = out
+                new_edges, new_offsets, new_pos = out
                 
                 new_edges[1] += i*num_probes
                 probe_edges = torch.cat((probe_edges, new_edges), dim=1)
@@ -206,7 +206,7 @@ class ProbeGraphAdder():
         probe_data.atomic_numbers = atomic_numbers
         probe_data.natoms = torch.LongTensor([int(len(atomic_numbers))])
         probe_data.pos = torch.cat((data_object.pos, probe_pos))
-        probe_data.target = torch.Tensor(density[probe_choice])
+        probe_data.target = torch.tensor(density[probe_choice])
         probe_data.edge_index = probe_edges.long()
         
         probe_data.cell_offsets = -probe_offsets
