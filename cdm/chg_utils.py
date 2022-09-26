@@ -121,12 +121,6 @@ class ProbeGraphAdder():
             stride = self.stride
         
         probe_data = Data()
-        '''
-        atoms = Atoms(numbers = data_object.atomic_numbers.tolist(),
-                      positions = data_object.pos.cpu().detach().numpy(),
-                      cell = data_object.cell.cpu().detach().numpy()[0],
-                      pbc = [True, True, True])
-        '''
         density = np.array(data_object.charge_density)
         
         if stride != 1:
@@ -303,12 +297,6 @@ class RadiusGraphPBCWrapper:
         self.cutoff = radius
         atom_indices = torch.arange(0, len(atom_pos), device = atom_pos.device)
         probe_indices = torch.arange(len(atom_pos), len(atom_pos)+len(probe_pos), device = probe_pos.device)
-        
-        #is_probe = atoms.get_atomic_numbers() == 0
-        
-        #atom_pos = atoms.get_positions()[~is_probe]
-        #probe_pos = atoms.get_positions()[is_probe]
-        #cell = torch.unsqueeze(torch.FloatTensor(np.array(atoms.get_cell())), 0)
         batch_size = 1
         
         num_atoms = len(atom_pos)
@@ -413,6 +401,9 @@ class RadiusGraphPBCWrapper:
             cutoff == self.cutoff
         ), "Cutoff must be the same as used to initialise the neighborlist"
         
+        if include_atomic_edges:
+            raise NotImplementedError
+        
         return self.edge_index.to(torch.int64), self.offsets
     
 def calculate_grid_pos(shape, cell):
@@ -443,13 +434,6 @@ def get_edges_from_choice(probe_choice, grid_pos, atom_pos, cell, cutoff, includ
         """
         
         probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
-        
-        '''
-        probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
-        atoms_with_probes = atoms.copy()
-        atoms_with_probes.extend(probe_atoms)
-        atomic_numbers = atoms_with_probes.get_atomic_numbers()
-        '''
         
         if implementation == 'ASE':
             neighborlist = AseNeighborListWrapper(cutoff, atom_pos, probe_pos, cell)
