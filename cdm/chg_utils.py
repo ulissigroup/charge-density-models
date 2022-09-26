@@ -100,10 +100,13 @@ class ProbeGraphAdder():
         
     def __call__(self, data_object, 
                  slice_start = None,
-                num_probes = None,
-                mode = None,
-                stride = None,
-                use_tqdm = False):
+                 num_probes = None,
+                 mode = None,
+                 stride = None,
+                 use_tqdm = False):
+        
+        if self.implementation == 'SKIP':
+            return data_object
         
         # Check if probe graph has been precomputed
         if hasattr(data_object, 'probe_data'):
@@ -130,8 +133,8 @@ class ProbeGraphAdder():
         grid_pos = calculate_grid_pos(density.shape, data_object.cell)
 
         if mode == 'random':
-            probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = num_probes)
-            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+            probe_choice = np.random.randint(np.prod(grid_pos.shape[-5:-2]), size = num_probes)
+            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
 
             out = get_edges_from_choice(
                 probe_choice,
@@ -148,7 +151,7 @@ class ProbeGraphAdder():
 
         if mode == 'slice':
             probe_choice = np.arange(slice_start, slice_start + num_probes, step=1)
-            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
             out = get_edges_from_choice(
                 probe_choice,
                 grid_pos,
@@ -180,7 +183,7 @@ class ProbeGraphAdder():
                 else:
                     probe_choice = np.arange(i * num_probes, (i+1)*num_probes, step = 1)
                     
-                probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+                probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
                 out = get_edges_from_choice(
                     probe_choice,
                     grid_pos,
@@ -198,15 +201,18 @@ class ProbeGraphAdder():
                 atomic_numbers = torch.cat((atomic_numbers, torch.zeros(new_pos.shape[0], device = atomic_numbers.device)))
                 probe_pos = torch.cat((probe_pos, new_pos))
                 
-            probe_choice = np.arange(0, np.prod(grid_pos.shape[0:3]), step=1)
-            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+            probe_choice = np.arange(0, np.prod(grid_pos.shape[-5:-2]), step=1)
+            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
         
         # Add attributes to probe_data object
         probe_data.cell = data_object.cell
         probe_data.atomic_numbers = atomic_numbers
         probe_data.natoms = torch.LongTensor([int(len(atomic_numbers))])
         probe_data.pos = torch.cat((data_object.pos, probe_pos))
-        probe_data.target = torch.tensor(density[probe_choice])
+        
+        density = density.reshape(density.shape[-3:])[probe_choice[0:3]]
+        probe_data.target = torch.tensor(density, device = probe_pos.device)
+        
         probe_data.edge_index = probe_edges.long()
         
         probe_data.cell_offsets = -probe_offsets
@@ -418,9 +424,9 @@ def calculate_grid_pos(shape, cell):
     
     # Compute grid positions
     grid_pos = torch.cartesian_prod(
-        torch.linspace(0, 1, shape[0]+1, device = cell.device)[:-1],
-        torch.linspace(0, 1, shape[1]+1, device = cell.device)[:-1],
-        torch.linspace(0, 1, shape[2]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[-3]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[-2]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[-1]+1, device = cell.device)[:-1],
     )
     
     grid_pos = torch.mm(grid_pos, cell)
@@ -431,9 +437,14 @@ def get_edges_from_choice(probe_choice, grid_pos, atom_pos, cell, cutoff, includ
         """
         Given a list of chosen probes, compute all edges between the probes and atoms.
         Portions from DeepDFT
-        """
+        """ 
+        grid_pos = grid_pos.reshape((*grid_pos.shape[-5:-2], 3))
+        probe_pos = grid_pos[probe_choice[0:3]]
         
-        probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
+        '''
+        probe_pos = grid_pos[..., probe_choice[0:3], :, :][:, 0, :]
+        probe_pos = torch.reshape(probe_pos, (-1, 3))
+        '''
         
         if implementation == 'ASE':
             neighborlist = AseNeighborListWrapper(cutoff, atom_pos, probe_pos, cell)

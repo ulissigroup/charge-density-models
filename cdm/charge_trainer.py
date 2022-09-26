@@ -93,32 +93,40 @@ class ChargeTrainer(BaseTrainer):
             'val_probes': 300,
             'test_probes': 300,
             'include_atomic_edges': False,
+            'implementation': 'SKIP',
         },
         trainer = 'charge',
     ):
         
-        self.pga_train = ProbeGraphAdder(slice_start = 0, 
-                                         num_probes = probe_graph_config['train_probes'], 
-                                         mode='random', 
-                                         cutoff = probe_graph_config['cutoff'], 
-                                         stride = 1,
-                                         include_atomic_edges = probe_graph_config['include_atomic_edges'],
-                                        )
+        self.pga_train = ProbeGraphAdder(
+            slice_start = 0, 
+            num_probes = probe_graph_config['train_probes'], 
+            mode='random', 
+            cutoff = probe_graph_config['cutoff'], 
+            stride = 1,
+            include_atomic_edges = probe_graph_config['include_atomic_edges'],
+            implementation = probe_graph_config['implementation'],
+        )
         
-        self.pga_val = ProbeGraphAdder(slice_start = 0, 
-                                         num_probes = probe_graph_config['val_probes'], 
-                                         mode='random', 
-                                         cutoff = probe_graph_config['cutoff'], 
-                                         stride = 1,
-                                         include_atomic_edges = probe_graph_config['include_atomic_edges'],
-                                        )
-        self.pga_test = ProbeGraphAdder(slice_start = 0,
-                                         num_probes = probe_graph_config['test_probes'], 
-                                         mode='random', 
-                                         cutoff = probe_graph_config['cutoff'], 
-                                         stride = 1,
-                                         include_atomic_edges = probe_graph_config['include_atomic_edges'],
-                                        )
+        self.pga_val = ProbeGraphAdder(
+            slice_start = 0, 
+            num_probes = probe_graph_config['train_probes'], 
+            mode='random', 
+            cutoff = probe_graph_config['cutoff'], 
+            stride = 1,
+            include_atomic_edges = probe_graph_config['include_atomic_edges'],
+            implementation = probe_graph_config['implementation'],
+        )
+        self.pga_test = ProbeGraphAdder(
+            slice_start = 0, 
+            num_probes = probe_graph_config['train_probes'], 
+            mode='random', 
+            cutoff = probe_graph_config['cutoff'], 
+            stride = 1,
+            include_atomic_edges = probe_graph_config['include_atomic_edges'],
+            implementation = probe_graph_config['implementation'],
+        )
+        
         super().__init__(
             task=task,
             model=model,
@@ -205,9 +213,10 @@ class ChargeTrainer(BaseTrainer):
             disable=disable_tqdm,
         ):
             
-            for subbatch in batch:
-                subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
-                subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
+            if hasattr(batch[0], 'probe_data'):
+                for subbatch in batch:
+                    subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
+                    subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
             
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch)
@@ -262,10 +271,11 @@ class ChargeTrainer(BaseTrainer):
                 # Get a batch.
 
                 batch = next(train_loader_iter)
-
-                for subbatch in batch:
-                    subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
-                    subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
+                
+                if hasattr(batch[0], 'probe_data'):
+                    for subbatch in batch:
+                        subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
+                        subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
                 
                 # Forward, loss, backward.
                 with torch.cuda.amp.autocast(enabled=self.scaler is not None):
@@ -470,9 +480,10 @@ class ChargeTrainer(BaseTrainer):
             desc="device {}".format(rank),
             disable=disable_tqdm,
         ):
-            for subbatch in batch:
-                subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
-                subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
+            if hasattr(batch[0], 'probe_data'):
+                for subbatch in batch:
+                    subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
+                    subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
                                                     
             # Forward.
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
