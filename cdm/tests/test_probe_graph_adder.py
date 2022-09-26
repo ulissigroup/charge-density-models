@@ -22,43 +22,53 @@ def old_calculate_grid_pos(shape, cell):
     grid_pos = np.stack(grid_pos, 3)
     grid_pos = np.dot(grid_pos, cell)
     
-    return grid_pos
+    return torch.tensor(grid_pos, dtype=torch.float)
 
 def test_calculate_grid_pos():
     # Base case
     shape = [2, 2, 2]
-    cell = [[1, 0, 0],
+    cell = [[[1, 0, 0],
             [0, 1, 0],
-            [0, 0, 1]]
-    assert (calculate_grid_pos(shape, cell) == old_calculate_grid_pos(shape, cell)).all()
+            [0, 0, 1]]]
+    cell = torch.tensor(cell, dtype=torch.float)
+    
+    assert torch.allclose(calculate_grid_pos(shape, cell), old_calculate_grid_pos(shape, cell))
     
     # Non-uniform spacing
     shape = [20, 5, 2]
-    cell = [[1, 0, 0],
+    cell = [[[1, 0, 0],
             [0, 1, 0],
-            [0, 0, 1]]
-    assert (calculate_grid_pos(shape, cell) == old_calculate_grid_pos(shape, cell)).all()
+            [0, 0, 1]]]
+    cell = torch.tensor(cell, dtype=torch.float)
+    
+    assert torch.allclose(calculate_grid_pos(shape, cell), old_calculate_grid_pos(shape, cell))
     
     # Rectangular cell
     shape = [7, 7, 7]
-    cell = [[3, 0, 0],
+    cell = [[[3, 0, 0],
             [0, 4, 0],
-            [0, 0, 5]]
-    assert (calculate_grid_pos(shape, cell) == old_calculate_grid_pos(shape, cell)).all()
+            [0, 0, 5]]]
+    cell = torch.tensor(cell, dtype=torch.float)
+    
+    assert torch.allclose(calculate_grid_pos(shape, cell), old_calculate_grid_pos(shape, cell))
     
     # Skew cell
     shape = [31, 16, 44]
-    cell = [[1, 5, 0],
+    cell = [[[1, 5, 0],
             [0, 4, 0],
-            [0, 1, 6]]
-    assert (calculate_grid_pos(shape, cell) == old_calculate_grid_pos(shape, cell)).all()
+            [0, 1, 6]]]
+    cell = torch.tensor(cell, dtype=torch.float)
+    
+    assert torch.allclose(calculate_grid_pos(shape, cell), old_calculate_grid_pos(shape, cell))
     
     # Edge case
     shape = [1, 1, 1]
-    cell = [[1, 0, 0],
+    cell = [[[1, 0, 0],
             [0, 1, 0],
-            [0, 0, 1]]
-    assert (calculate_grid_pos(shape, cell) == old_calculate_grid_pos(shape, cell)).all()
+            [0, 0, 1]]]
+    cell = torch.tensor(cell, dtype=torch.float)
+    
+    assert torch.allclose(calculate_grid_pos(shape, cell), old_calculate_grid_pos(shape, cell))
     
     
 def test_get_edges_from_choice():
@@ -68,7 +78,7 @@ def test_get_edges_from_choice():
     
     atoms = vcd.atoms[0]
     dens = vcd.chg[0]
-    cell = torch.tensor(np.array([atoms.cell.array]))
+    cell = torch.tensor(np.array([atoms.cell.array]), dtype=torch.float)
     grid_pos = calculate_grid_pos(dens.shape, cell)
     
     probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = 100)
@@ -121,6 +131,8 @@ def test_end_to_end_graph_gen():
     structure.cell = [[10, 0, 0],
                       [0, 10, 0],
                       [0, 0, 10]]
+    
+    cell = torch.tensor(np.array(structure.cell), dtype=torch.float, device = 'cuda')
 
     structure.positions = [[0, 9, 0]]
     

@@ -131,7 +131,7 @@ class ProbeGraphAdder():
         if stride != 1:
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
-
+            
         grid_pos = calculate_grid_pos(density.shape, data_object.cell)
 
         if mode == 'random':
@@ -397,19 +397,24 @@ class RadiusGraphPBCWrapper:
         return self.edge_index.to(torch.int64), self.offsets
     
 def calculate_grid_pos(shape, cell):
-    """
-    From DeepDFT
-    """
-    # Calculate grid positions
-    ngridpts = np.array(shape)  # grid matrix
-    grid_pos = np.meshgrid(
-        np.arange(ngridpts[0]) / shape[0],
-        np.arange(ngridpts[1]) / shape[1],
-        np.arange(ngridpts[2]) / shape[2],
-        indexing="ij",
+    # Ensure proper dimensions of cell
+    if len(cell.shape) > 2:
+        if cell.shape[0] == 1:
+            cell = cell[0, :, :]
+        else:
+            raise NotImplementedError('calculate_grid_pos does not yet support batch sizes > 1')
+    else:
+        raise RuntimeError('Invalid unit cell definition for calculate_grid_pos')
+    
+    # Compute grid positions
+    grid_pos = torch.cartesian_prod(
+        torch.linspace(0, 1, shape[0]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[1]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[2]+1, device = cell.device)[:-1],
     )
-    grid_pos = np.stack(grid_pos, 3)
-    grid_pos = np.dot(grid_pos, cell)
+    
+    grid_pos = torch.mm(grid_pos, cell)
+    grid_pos = grid_pos.reshape((*shape, 1, 3))
     return grid_pos
 
 def get_edges_from_choice(probe_choice, grid_pos, atoms, cutoff, include_atomic_edges, implementation):
@@ -417,6 +422,7 @@ def get_edges_from_choice(probe_choice, grid_pos, atoms, cutoff, include_atomic_
         Given a list of chosen probes, compute all edges between the probes and atoms.
         Portions from DeepDFT
         """
+        
         probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
 
         probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
@@ -435,7 +441,7 @@ def get_edges_from_choice(probe_choice, grid_pos, atoms, cutoff, include_atomic_
         
         edge_index, cell_offsets = neighborlist.get_all_neighbors(cutoff, include_atomic_edges)
 
-        return edge_index, cell_offsets, atomic_numbers, torch.tensor(probe_pos)
+        return edge_index, cell_offsets, atomic_numbers, torch.tensor(np.array(probe_pos))
 
     
 class charge_density:
