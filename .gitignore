@@ -4,6 +4,7 @@ logs/
 __pycache__/
 cdm/__pycache__/
 cdm/tests/__pycache__/
+cdm/models/__pycache__/
 wandb/
 .ipynb_checkpoints/
 *.egg-info/

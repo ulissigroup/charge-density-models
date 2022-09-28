@@ -13,7 +13,7 @@ trainer: cdm.charge_trainer.ChargeTrainer
 
 model:
     name: charge_model
-    num_interactions: 5
+    num_interactions: 3
     atom_channels: 32
     probe_channels: 32
     enforce_zero_for_disconnected_probes: True
@@ -30,8 +30,8 @@ model:
         
 optim:
     optimizer: Adam
-    batch_size: 2
-    eval_batch_size: 2
+    batch_size: 1
+    eval_batch_size: 1
     num_workers: 24
     lr_initial: 0.00005
     scheduler: ReduceLROnPlateau
