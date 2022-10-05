@@ -2,8 +2,7 @@ runs/
 checkpoints/
 logs/
 __pycache__/
-cdm/__pycache__/
-cdm/tests/__pycache__/
+*/__pycache__/
 wandb/
 .ipynb_checkpoints/
 *.egg-info/

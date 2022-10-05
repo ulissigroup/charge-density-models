@@ -1,7 +1,4 @@
 import torch
-from ocpmodels.common.utils import conditional_grad
-from ocpmodels.common.registry import registry
-from ocpmodels.datasets import data_list_collater
 from ase import Atoms
 from pymatgen.core.sites import PeriodicSite
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -10,12 +7,25 @@ import pdb
 from tqdm import tqdm
 from torch_geometric.utils import remove_isolated_nodes
 
+from ocpmodels.common.utils import conditional_grad
+from ocpmodels.common.registry import registry
+from ocpmodels.datasets import data_list_collater
+
+from cdm.chg_utils import ProbeGraphAdder
+
 @registry.register_model("charge_model")
 class ChargeModel(torch.nn.Module):
     def __init__(
         self,
         atom_model_config = {'name': 'schnet_charge'},
         probe_model_config = {'name': 'schnet_charge'},
+        otf_pga_config = {'num_probes': 500,
+                          'cutoff': 4,
+                          'include_atomic_edges': False,
+                          'mode': 'random',
+                          'stride': 1,
+                          'implementation': 'RGPBC',
+                         },
         num_interactions = 5,
         atom_channels = 128,
         probe_channels = 128,
@@ -57,12 +67,22 @@ class ChargeModel(torch.nn.Module):
                 torch.nn.Linear(atom_channels, probe_channels))
         else:
             self.reduce_atom_representations = False
+            
+        self.otf_pga = ProbeGraphAdder(
+            num_probes = otf_pga_config['num_probes'],
+            cutoff = otf_pga_config['cutoff'],
+            include_atomic_edges = otf_pga_config['include_atomic_edges'],
+            mode = otf_pga_config['mode'],
+            stride = otf_pga_config['stride'],
+            implementation = otf_pga_config['implementation'],
+        )
         
         
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
         # Ensure data has probe points
-        assert hasattr(data, 'probe_data')
+        if not hasattr(data, 'probe_data'):
+            data = self.otf_pga(data)
         
         atom_representations = self.forward_atomic(data)
 

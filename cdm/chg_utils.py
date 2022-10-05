@@ -1,21 +1,21 @@
-import ase.io
 import lmdb
 import pickle
 import numpy as np
-from tqdm import tqdm
-import os
-from ocpmodels.preprocessing import AtomsToGraphs
 import torch
-from pymatgen.core.sites import PeriodicSite
-from pymatgen.io.ase import AseAtomsAdaptor
-from torch_geometric.data import Data
-from ase import Atoms
-from ase.calculators.vasp import VaspChargeDensity
-import ase.neighborlist as nbl
-
+import os
 import pdb
 import time
+
 from tqdm import tqdm
+
+from torch_geometric.data import Data
+
+from ocpmodels.preprocessing import AtomsToGraphs
+from ocpmodels.datasets import data_list_collater
+
+from ase import Atoms
+from ase.calculators.vasp import VaspChargeDensity
+from ase import neighborlist as nbl
 
 def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, probe_graph_adder = None, stride = 1, cutoff = 6):
     '''
@@ -100,14 +100,27 @@ class ProbeGraphAdder():
         
     def __call__(self, data_object, 
                  slice_start = None,
-                num_probes = None,
-                mode = None,
-                stride = None,
-                use_tqdm = False):
+                 num_probes = None,
+                 mode = None,
+                 stride = None,
+                 use_tqdm = False):
+        
+        if self.implementation == 'SKIP':
+            return data_object
         
         # Check if probe graph has been precomputed
         if hasattr(data_object, 'probe_data'):
             if hasattr(data_object.probe_data, 'edge_index') and hasattr(data_object.probe_data, 'cell_offsets'):
+                return data_object
+
+        # Handle batching
+        if type(data_object.natoms) is not int:
+            if len(data_object.natoms) > 1:
+                data_list = data_object.to_data_list()
+                batches = [data_list_collater([data]) for data in data_list]
+                probe_data = [self(batch).probe_data for batch in batches]
+                probe_data = data_list_collater(probe_data)
+                data_object.probe_data = probe_data
                 return data_object
         
         # Use default options if none have been passed in
@@ -121,13 +134,8 @@ class ProbeGraphAdder():
             stride = self.stride
         
         probe_data = Data()
-        atoms = Atoms(numbers = data_object.atomic_numbers.tolist(),
-                      positions = data_object.pos.cpu().detach().numpy(),
-                      cell = data_object.cell.cpu().detach().numpy()[0],
-                      pbc = [True, True, True])
+        density = torch.tensor(data_object.charge_density)
 
-        density = np.array(data_object.charge_density)
-        
         if stride != 1:
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
@@ -135,40 +143,45 @@ class ProbeGraphAdder():
         grid_pos = calculate_grid_pos(density.shape, data_object.cell)
 
         if mode == 'random':
-            probe_choice = np.random.randint(np.prod(grid_pos.shape[0:3]), size = num_probes)
-            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+            probe_choice = np.random.randint(np.prod(grid_pos.shape[-5:-2]), size = num_probes)
+            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
 
             out = get_edges_from_choice(
-                probe_choice, 
-                grid_pos, 
-                atoms, 
-                self.cutoff, 
-                self.include_atomic_edges,
-                self.implementation,
+                probe_choice,
+                grid_pos,
+                atom_pos = data_object.pos,
+                cell = data_object.cell,
+                cutoff = self.cutoff,
+                include_atomic_edges = self.include_atomic_edges,
+                implementation = self.implementation,
             )
-            probe_edges, probe_offsets, atomic_numbers, probe_pos = out
+            probe_edges, probe_offsets, probe_pos = out
+            atomic_numbers = torch.clone(data_object.atomic_numbers.detach())
+            atomic_numbers = torch.cat((atomic_numbers, torch.zeros(num_probes, device = atomic_numbers.device)))
 
         if mode == 'slice':
             probe_choice = np.arange(slice_start, slice_start + num_probes, step=1)
-            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
             out = get_edges_from_choice(
-                probe_choice, 
-                grid_pos, 
-                atoms, 
-                self.cutoff, 
-                self.include_atomic_edges,
-                self.implementation,
+                probe_choice,
+                grid_pos,
+                atom_pos = data_object.pos,
+                cell = data_object.cell,
+                cutoff = self.cutoff,
+                include_atomic_edges = self.include_atomic_edges,
+                implementation = self.implementation,
             )
-            probe_edges, probe_offsets, atomic_numbers, probe_pos = out
+            probe_edges, probe_offsets, probe_pos = out
+            atomic_numbers = torch.cat((data_object.atomic_numbers, torch.zeros(num_probes, device = data_object.atomic_numbers.device)))
             
         if mode == 'all':
             total_probes = np.prod(density.shape)
             num_blocks = int(np.ceil(total_probes / num_probes))
             
-            probe_edges = torch.Tensor([])
-            probe_offsets = torch.Tensor([])
-            atomic_numbers = data_object.atomic_numbers
-            probe_pos = torch.Tensor([])
+            probe_edges = torch.tensor([], device = data_object.edge_index.device)
+            probe_offsets = torch.tensor([], device = data_object.cell_offsets.device)
+            atomic_numbers = torch.clone(data_object.atomic_numbers.detach())
+            probe_pos = torch.tensor([], device = data_object.pos.device)
             
             loop = range(num_blocks)
             if use_tqdm:
@@ -180,33 +193,36 @@ class ProbeGraphAdder():
                 else:
                     probe_choice = np.arange(i * num_probes, (i+1)*num_probes, step = 1)
                     
-                probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+                probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
                 out = get_edges_from_choice(
-                    probe_choice, 
-                    grid_pos, 
-                    atoms, 
-                    self.cutoff, 
-                    self.include_atomic_edges,
-                    self.implementation,
+                    probe_choice,
+                    grid_pos,
+                    atom_pos = data_object.pos,
+                    cell = data_object.cell,
+                    cutoff = self.cutoff,
+                    include_atomic_edges = self.include_atomic_edges,
+                    implementation = self.implementation,
                 )
-            
-                new_edges, new_offsets, new_atomic_numbers, new_pos = out
+                new_edges, new_offsets, new_pos = out
                 
                 new_edges[1] += i*num_probes
                 probe_edges = torch.cat((probe_edges, new_edges), dim=1)
                 probe_offsets = torch.cat((probe_offsets, new_offsets))
-                atomic_numbers = torch.cat((atomic_numbers, torch.zeros(new_pos.shape[0])))
+                atomic_numbers = torch.cat((atomic_numbers, torch.zeros(new_pos.shape[0], device = atomic_numbers.device)))
                 probe_pos = torch.cat((probe_pos, new_pos))
                 
-            probe_choice = np.arange(0, np.prod(grid_pos.shape[0:3]), step=1)
-            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[0:3])
+            probe_choice = np.arange(0, np.prod(grid_pos.shape[-5:-2]), step=1)
+            probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
         
         # Add attributes to probe_data object
         probe_data.cell = data_object.cell
-        probe_data.atomic_numbers = torch.Tensor(atomic_numbers)
+        probe_data.atomic_numbers = atomic_numbers
         probe_data.natoms = torch.LongTensor([int(len(atomic_numbers))])
         probe_data.pos = torch.cat((data_object.pos, probe_pos))
-        probe_data.target = torch.Tensor(density[probe_choice])
+        
+        density = density.reshape(density.shape[-3:])[probe_choice[0:3]]
+        probe_data.target = torch.tensor(density, device = probe_pos.device)
+        
         probe_data.edge_index = probe_edges.long()
         
         probe_data.cell_offsets = -probe_offsets
@@ -224,7 +240,18 @@ class AseNeighborListWrapper:
     Modified from DeepDFT
     """
 
-    def __init__(self, cutoff, atoms):
+    def __init__(self, cutoff, atom_pos, probe_pos, cell):
+        atoms = Atoms(numbers = [1] * len(atom_pos),
+        positions = atom_pos.cpu().detach().numpy(),
+        cell = cell.cpu().detach().numpy()[0],
+        pbc = [True, True, True])
+        
+        probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
+        atoms_with_probes = atoms.copy()
+        atoms_with_probes.extend(probe_atoms)
+        
+        atoms = atoms_with_probes
+        
         self.neighborlist = nbl.NewPrimitiveNeighborList(
             cutoff, skin=0.0, self_interaction=False, bothways=True
         )
@@ -282,14 +309,10 @@ class RadiusGraphPBCWrapper:
     The modifications restrict the neighbor-finding to atom-probe edges,
     which is more efficient for our purposes.
     """
-    def __init__(self, radius, atoms, pbc = [True, True, False]):
+    def __init__(self, radius, atom_pos, probe_pos, cell, pbc = [True, True, False]):
         self.cutoff = radius
-        
-        is_probe = atoms.get_atomic_numbers() == 0
-        
-        atom_pos = atoms.get_positions()[~is_probe]
-        probe_pos = atoms.get_positions()[is_probe]
-        cell = torch.unsqueeze(torch.FloatTensor(np.array(atoms.get_cell())), 0)
+        atom_indices = torch.arange(0, len(atom_pos), device = atom_pos.device)
+        probe_indices = torch.arange(len(atom_pos), len(atom_pos)+len(probe_pos), device = probe_pos.device)
         batch_size = 1
         
         num_atoms = len(atom_pos)
@@ -299,11 +322,11 @@ class RadiusGraphPBCWrapper:
         
         indices = np.arange(0, num_total, 1)
 
-        index1 = torch.FloatTensor(np.repeat(indices[~is_probe], repeats=num_probes))
-        index2 = torch.FloatTensor(np.tile(indices[is_probe], reps = num_atoms))
+        index1 = torch.repeat_interleave(atom_indices, repeats=num_probes)
+        index2 = probe_indices.repeat(num_atoms)
 
-        pos1 = torch.unsqueeze(torch.FloatTensor(np.repeat(atom_pos, repeats = num_probes, axis = 0)), 0)
-        pos2 = torch.unsqueeze(torch.FloatTensor(np.tile(probe_pos, (num_atoms, 1))), 0)
+        pos1 = atom_pos[index1]
+        pos2 = probe_pos[index2 - num_atoms]
 
         cross_a2a3 = torch.cross(cell[:, 1], cell[:, 2], dim=-1)
         cell_vol = torch.sum(cell[:, 0] * cross_a2a3, dim=-1, keepdim=True)
@@ -337,7 +360,7 @@ class RadiusGraphPBCWrapper:
         
         # Tensor of unit cells
         cells_per_dim = [
-            torch.arange(-rep, rep + 1, dtype=torch.float)
+            torch.arange(-rep, rep + 1, dtype=torch.float, device = cell.device)
             for rep in max_rep
         ]
         unit_cell = torch.cartesian_prod(*cells_per_dim)
@@ -394,48 +417,57 @@ class RadiusGraphPBCWrapper:
             cutoff == self.cutoff
         ), "Cutoff must be the same as used to initialise the neighborlist"
         
+        if include_atomic_edges:
+            raise NotImplementedError
+        
         return self.edge_index.to(torch.int64), self.offsets
     
 def calculate_grid_pos(shape, cell):
-    """
-    From DeepDFT
-    """
-    # Calculate grid positions
-    ngridpts = np.array(shape)  # grid matrix
-    grid_pos = np.meshgrid(
-        np.arange(ngridpts[0]) / shape[0],
-        np.arange(ngridpts[1]) / shape[1],
-        np.arange(ngridpts[2]) / shape[2],
-        indexing="ij",
+    # Ensure proper dimensions of cell
+    if len(cell.shape) > 2:
+        if cell.shape[0] == 1:
+            cell = cell[0, :, :]
+        else:
+            raise NotImplementedError('calculate_grid_pos does not yet support batch sizes > 1')
+    else:
+        raise RuntimeError('Invalid unit cell definition for calculate_grid_pos')
+    
+    # Compute grid positions
+    grid_pos = torch.cartesian_prod(
+        torch.linspace(0, 1, shape[-3]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[-2]+1, device = cell.device)[:-1],
+        torch.linspace(0, 1, shape[-1]+1, device = cell.device)[:-1],
     )
-    grid_pos = np.stack(grid_pos, 3)
-    grid_pos = np.dot(grid_pos, cell)
+    
+    grid_pos = torch.mm(grid_pos, cell)
+    grid_pos = grid_pos.reshape((*shape, 1, 3))
     return grid_pos
 
-def get_edges_from_choice(probe_choice, grid_pos, atoms, cutoff, include_atomic_edges, implementation):
+def get_edges_from_choice(probe_choice, grid_pos, atom_pos, cell, cutoff, include_atomic_edges, implementation):
         """
         Given a list of chosen probes, compute all edges between the probes and atoms.
         Portions from DeepDFT
-        """
-        probe_pos = grid_pos[probe_choice[0:3]][:, 0, :]
-
-        probe_atoms = Atoms(numbers = [0] * len(probe_pos), positions = probe_pos)
-        atoms_with_probes = atoms.copy()
-        atoms_with_probes.extend(probe_atoms)
-        atomic_numbers = atoms_with_probes.get_atomic_numbers()
-
+        """ 
+        grid_pos = grid_pos.reshape((*grid_pos.shape[-5:-2], 3))
+        probe_pos = grid_pos[probe_choice[0:3]]
+        
+        '''
+        probe_pos = grid_pos[..., probe_choice[0:3], :, :][:, 0, :]
+        probe_pos = torch.reshape(probe_pos, (-1, 3))
+        '''
+        
         if implementation == 'ASE':
-            neighborlist = AseNeighborListWrapper(cutoff, atoms_with_probes)
+            neighborlist = AseNeighborListWrapper(cutoff, atom_pos, probe_pos, cell)
         
         elif implementation == 'RGPBC':
-            neighborlist = RadiusGraphPBCWrapper(cutoff, atoms_with_probes)
+            neighborlist = RadiusGraphPBCWrapper(cutoff, atom_pos, probe_pos, cell)
             
         else:
             raise NotImplementedError('Unsupported implementation. Please choose from: ASE, RGPBC')
         
         edge_index, cell_offsets = neighborlist.get_all_neighbors(cutoff, include_atomic_edges)
 
-        return edge_index, cell_offsets, atomic_numbers, torch.tensor(probe_pos)
+        return edge_index, cell_offsets, probe_pos
 
     
 class charge_density:
