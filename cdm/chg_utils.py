@@ -1,17 +1,21 @@
 import lmdb
 import pickle
 import numpy as np
-from tqdm import tqdm
-import os
-from ocpmodels.preprocessing import AtomsToGraphs
 import torch
-from torch_geometric.data import Data
-from ase import Atoms
-from ase.calculators.vasp import VaspChargeDensity
-import ase.neighborlist as nbl
-
+import os
 import pdb
 import time
+
+from tqdm import tqdm
+
+from torch_geometric.data import Data
+
+from ocpmodels.preprocessing import AtomsToGraphs
+from ocpmodels.datasets import data_list_collater
+
+from ase import Atoms
+from ase.calculators.vasp import VaspChargeDensity
+from ase import neighborlist as nbl
 
 def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, probe_graph_adder = None, stride = 1, cutoff = 6):
     '''
@@ -108,6 +112,16 @@ class ProbeGraphAdder():
         if hasattr(data_object, 'probe_data'):
             if hasattr(data_object.probe_data, 'edge_index') and hasattr(data_object.probe_data, 'cell_offsets'):
                 return data_object
+
+        # Handle batching
+        if type(data_object.natoms) is not int:
+            if len(data_object.natoms) > 1:
+                data_list = data_object.to_data_list()
+                batches = [data_list_collater([data]) for data in data_list]
+                probe_data = [self(batch).probe_data for batch in batches]
+                probe_data = data_list_collater(probe_data)
+                data_object.probe_data = probe_data
+                return data_object
         
         # Use default options if none have been passed in
         if slice_start is None:
@@ -120,13 +134,12 @@ class ProbeGraphAdder():
             stride = self.stride
         
         probe_data = Data()
-        #density = np.array(data_object.charge_density)
-        density = data_object.charge_density
+        density = torch.tensor(data_object.charge_density)
 
         if stride != 1:
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
-            
+
         grid_pos = calculate_grid_pos(density.shape, data_object.cell)
 
         if mode == 'random':
