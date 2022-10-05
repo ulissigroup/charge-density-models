@@ -1,4 +1,3 @@
-import ase.io
 import lmdb
 import pickle
 import numpy as np
@@ -6,8 +5,6 @@ from tqdm import tqdm
 import os
 from ocpmodels.preprocessing import AtomsToGraphs
 import torch
-from pymatgen.core.sites import PeriodicSite
-from pymatgen.io.ase import AseAtomsAdaptor
 from torch_geometric.data import Data
 from ase import Atoms
 from ase.calculators.vasp import VaspChargeDensity
@@ -15,7 +12,6 @@ import ase.neighborlist as nbl
 
 import pdb
 import time
-from tqdm import tqdm
 
 def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, probe_graph_adder = None, stride = 1, cutoff = 6):
     '''
@@ -124,8 +120,9 @@ class ProbeGraphAdder():
             stride = self.stride
         
         probe_data = Data()
-        density = np.array(data_object.charge_density)
-        
+        #density = np.array(data_object.charge_density)
+        density = data_object.charge_density
+
         if stride != 1:
             assert (stride == 2) or (stride == 4)
             density = density[::stride, ::stride, ::stride]
@@ -162,7 +159,7 @@ class ProbeGraphAdder():
                 implementation = self.implementation,
             )
             probe_edges, probe_offsets, probe_pos = out
-            atomic_numbers = torch.cat((atomic_numbers, torch.zeros(num_probes, device = atomic_numbers.device)))
+            atomic_numbers = torch.cat((data_object.atomic_numbers, torch.zeros(num_probes, device = data_object.atomic_numbers.device)))
             
         if mode == 'all':
             total_probes = np.prod(density.shape)
