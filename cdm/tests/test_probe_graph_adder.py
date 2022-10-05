@@ -1,5 +1,6 @@
 import torch
 import os
+import numpy as np
 import warnings
 
 from ase.build import molecule
@@ -10,7 +11,7 @@ from ocpmodels.models.base import BaseModel
 from ocpmodels.preprocessing.atoms_to_graphs import AtomsToGraphs
 from ocpmodels.datasets import data_list_collater
 
-from cdm.chg_utils import *
+from cdm.utils.probe_graph import calculate_grid_pos, ProbeGraphAdder, get_edges_from_choice
 
 def old_calculate_grid_pos(shape, cell):
     ngridpts = np.array(shape) 

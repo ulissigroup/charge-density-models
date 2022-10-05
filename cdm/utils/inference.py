@@ -9,7 +9,7 @@ from torch_geometric.data import Batch
 from ocpmodels.preprocessing import AtomsToGraphs
 from ocpmodels.datasets import data_list_collater
 
-from cdm.chg_utils import ProbeGraphAdder
+from cdm.utils.probe_graph import ProbeGraphAdder
 
 import pdb
 

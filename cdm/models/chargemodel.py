@@ -11,7 +11,7 @@ from ocpmodels.common.utils import conditional_grad
 from ocpmodels.common.registry import registry
 from ocpmodels.datasets import data_list_collater
 
-from cdm.chg_utils import ProbeGraphAdder
+from cdm.utils.probe_graph import ProbeGraphAdder
 
 @registry.register_model("charge_model")
 class ChargeModel(torch.nn.Module):
