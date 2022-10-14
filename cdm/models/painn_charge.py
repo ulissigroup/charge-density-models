@@ -68,7 +68,10 @@ class PaiNN_Charge(PaiNN):
         
         batch = data.batch
         z = data.atomic_numbers.long()
-
+        
+        data.natoms = data.natoms.to(data.cell.device)
+        data.neighbors = data.neighbors.to(data.cell.device)
+        
         (
             edge_index,
             neighbors,
