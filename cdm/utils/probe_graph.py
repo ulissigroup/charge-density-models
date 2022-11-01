@@ -33,6 +33,7 @@ class ProbeGraphAdder():
         self.slice_start = slice_start
         self.stride = stride
         self.implementation = implementation
+
         
     def __call__(self, data_object, 
                  slice_start = None,
@@ -155,15 +156,16 @@ class ProbeGraphAdder():
         probe_data.atomic_numbers = atomic_numbers
         probe_data.natoms = torch.LongTensor([int(len(atomic_numbers))])
         probe_data.pos = torch.cat((data_object.pos, probe_pos))
-        
-        density = density.reshape(density.shape[-3:])[probe_choice[0:3]]
-        probe_data.target = torch.tensor(density, device = probe_pos.device)
+
+        probe_data.target = torch.tensor(density.reshape(density.shape[-3:])[probe_choice[0:3]], device = probe_pos.device)
         
         probe_data.edge_index = probe_edges.long()
         
         probe_data.cell_offsets = -probe_offsets
         
         probe_data.neighbors = torch.LongTensor([probe_data.edge_index.shape[1]])
+
+        probe_data.total_target = torch.sum(density) * torch.numel(probe_data.target) / torch.numel(density)
         
         # Add probe_data object to overall data object
         data_object.probe_data = probe_data

@@ -19,9 +19,10 @@ def inference(
     grid = (100, 100, 100), 
     atom_cutoff = 6, 
     probe_cutoff = 6,
-    batch_size = 10000, 
+    batch_size = 10000,
     use_tqdm = True, 
-    device='cuda'):
+    device='cuda',
+    total_density = None,):
 
     if device is 'cuda' and (torch.cuda.is_available() == False):
         warnings.warn('Cuda not available: running on CPU. Set device="cpu" to avoid this warning')
@@ -39,6 +40,8 @@ def inference(
     data_object = a2g.convert(atoms)
 
     data_object.charge_density = torch.zeros(grid)
+    if total_density is not None:
+        data_object.charge_density[0,0,0] = total_density
     data_object.to(device)
     model.to(device)
 

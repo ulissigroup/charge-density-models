@@ -31,11 +31,13 @@ class ChargeModel(torch.nn.Module):
         probe_channels = 128,
         include_atomic_edges = False,
         enforce_zero_for_disconnected_probes = False,
+        enforce_charge_conservation = False,
         name = 'charge_model',
     ):
         super().__init__()
         self.regress_forces = False
         self.enforce_zero_for_disconnected_probes = enforce_zero_for_disconnected_probes
+        self.enforce_charge_conservation = enforce_charge_conservation
         
         self.probe_output_function = torch.nn.Sequential(
             torch.nn.Linear(probe_channels, probe_channels),
@@ -115,5 +117,8 @@ class ChargeModel(torch.nn.Module):
             _, _, is_not_isolated = remove_isolated_nodes(data.edge_index, num_nodes = len(data.atomic_numbers))
             is_isolated = ~is_not_isolated
             probe_results[is_isolated[is_probe]] = torch.zeros_like(probe_results[is_isolated[is_probe]])
+
+        if self.enforce_charge_conservation:
+            probe_results *= data.total_target / torch.sum(probe_results)
         
         return probe_results
