@@ -10,7 +10,6 @@ from ase import neighborlist as nbl
 from ocpmodels.preprocessing import AtomsToGraphs
 from ocpmodels.datasets import data_list_collater
 
-
 class ProbeGraphAdder():
     '''
     A class that is used to add probe graphs to data objects.
@@ -35,12 +34,16 @@ class ProbeGraphAdder():
         self.implementation = implementation
 
         
-    def __call__(self, data_object, 
-                 slice_start = None,
-                 num_probes = None,
-                 mode = None,
-                 stride = None,
-                 use_tqdm = False):
+    def __call__(
+        self,
+        data_object, 
+        slice_start = None,
+        specify_probes = None,
+        num_probes = None,
+        mode = None,
+        stride = None,
+        use_tqdm = False,
+    ):
         
         if self.implementation == 'SKIP':
             return data_object
@@ -95,8 +98,23 @@ class ProbeGraphAdder():
             probe_edges, probe_offsets, probe_pos = out
             atomic_numbers = torch.clone(data_object.atomic_numbers.detach())
             atomic_numbers = torch.cat((atomic_numbers, torch.zeros(num_probes, device = atomic_numbers.device)))
+            
+        elif mode == 'specify':
+            num_probes = len(specify_probes)
+            probe_choice = np.unravel_index(specify_probes, grid_pos.shape[-5:-2])
+            out = get_edges_from_choice(
+                probe_choice,
+                grid_pos,
+                atom_pos = data_object.pos,
+                cell = data_object.cell,
+                cutoff = self.cutoff,
+                include_atomic_edges = self.include_atomic_edges,
+                implementation = self.implementation,
+            )
+            probe_edges, probe_offsets, probe_pos = out
+            atomic_numbers = torch.cat((data_object.atomic_numbers, torch.zeros(num_probes, device = data_object.atomic_numbers.device)))
 
-        if mode == 'slice':
+        elif mode == 'slice':
             probe_choice = np.arange(slice_start, slice_start + num_probes, step=1)
             probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
             out = get_edges_from_choice(
@@ -111,7 +129,7 @@ class ProbeGraphAdder():
             probe_edges, probe_offsets, probe_pos = out
             atomic_numbers = torch.cat((data_object.atomic_numbers, torch.zeros(num_probes, device = data_object.atomic_numbers.device)))
             
-        if mode == 'all':
+        elif mode == 'all':
             total_probes = np.prod(density.shape)
             num_blocks = int(np.ceil(total_probes / num_probes))
             
@@ -150,6 +168,9 @@ class ProbeGraphAdder():
                 
             probe_choice = np.arange(0, np.prod(grid_pos.shape[-5:-2]), step=1)
             probe_choice = np.unravel_index(probe_choice, grid_pos.shape[-5:-2])
+            
+        else:
+            raise RuntimeError('Mode '+mode+' is not recognized.')
         
         # Add attributes to probe_data object
         probe_data.cell = data_object.cell
@@ -388,11 +409,6 @@ def get_edges_from_choice(probe_choice, grid_pos, atom_pos, cell, cutoff, includ
         """ 
         grid_pos = grid_pos.reshape((*grid_pos.shape[-5:-2], 3))
         probe_pos = grid_pos[probe_choice[0:3]]
-        
-        '''
-        probe_pos = grid_pos[..., probe_choice[0:3], :, :][:, 0, :]
-        probe_pos = torch.reshape(probe_pos, (-1, 3))
-        '''
         
         if implementation == 'ASE':
             neighborlist = AseNeighborListWrapper(cutoff, atom_pos, probe_pos, cell)
