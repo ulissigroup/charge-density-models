@@ -14,8 +14,6 @@ from ocpmodels.common.utils import (
     radius_graph_pbc,
 )
 
-import pdb
-
 @registry.register_model("painn_charge")
 class PaiNN_Charge(PaiNN):
     def __init__(
@@ -26,10 +24,10 @@ class PaiNN_Charge(PaiNN):
         otf_graph = False,
         
         hidden_channels = 128,
-        num_interactions = 6,
+        num_interactions = 3,
         num_rbf = 32,
         cutoff = 5,
-        max_neighbors = 200,
+        max_neighbors = 1e6,
         rbf: dict = {"name": "gaussian"},
         envelope: dict = {"name": "polynomial", "exponent": 5},
         scale_file: Optional[str] = None,

@@ -3,15 +3,20 @@ from ase import Atoms
 from pymatgen.core.sites import PeriodicSite
 from pymatgen.io.ase import AseAtomsAdaptor
 import numpy as np
-import pdb
 from tqdm import tqdm
+import warnings
+
+from torch_geometric.data import Batch
 from torch_geometric.utils import remove_isolated_nodes
 
 from ocpmodels.common.utils import conditional_grad
 from ocpmodels.common.registry import registry
 from ocpmodels.datasets import data_list_collater
+from ocpmodels.common.utils import pyg2_data_transform
 
 from cdm.utils.probe_graph import ProbeGraphAdder
+
+import pdb
 
 @registry.register_model("charge_model")
 class ChargeModel(torch.nn.Module):
@@ -31,11 +36,13 @@ class ChargeModel(torch.nn.Module):
         probe_channels = 128,
         include_atomic_edges = False,
         enforce_zero_for_disconnected_probes = False,
+        enforce_charge_conservation = False,
         name = 'charge_model',
     ):
         super().__init__()
         self.regress_forces = False
         self.enforce_zero_for_disconnected_probes = enforce_zero_for_disconnected_probes
+        self.enforce_charge_conservation = enforce_charge_conservation
         
         self.probe_output_function = torch.nn.Sequential(
             torch.nn.Linear(probe_channels, probe_channels),
@@ -83,6 +90,8 @@ class ChargeModel(torch.nn.Module):
         # Ensure data has probe points
         if not hasattr(data, 'probe_data'):
             data = self.otf_pga(data)
+            data.probe_data = [pyg2_data_transform(data.probe_data)]
+            data.probe_data = Batch.from_data_list(data.probe_data)
         
         atom_representations = self.forward_atomic(data)
 
@@ -105,15 +114,22 @@ class ChargeModel(torch.nn.Module):
             
     @conditional_grad(torch.enable_grad())        
     def forward_probe(self, data, atom_representations):
-        
         data.atom_representations = atom_representations
         probe_representations = self.probe_message_model(data)
         probe_results = self.probe_output_function(probe_representations).flatten()
+        probe_results = torch.nan_to_num(probe_results)
         
         if self.enforce_zero_for_disconnected_probes:
             is_probe = data.atomic_numbers == 0
             _, _, is_not_isolated = remove_isolated_nodes(data.edge_index, num_nodes = len(data.atomic_numbers))
             is_isolated = ~is_not_isolated
             probe_results[is_isolated[is_probe]] = torch.zeros_like(probe_results[is_isolated[is_probe]])
+
+        if self.enforce_charge_conservation: 
+            if torch.sum(probe_results) == 0:
+                warnings.warn('Charge prediction is 0 - cannot enforce charge conservation!')
+            else:
+                data.total_target = data.total_target.to(probe_results.device)
+                probe_results *= data.total_target / torch.sum(probe_results)
         
         return probe_results
