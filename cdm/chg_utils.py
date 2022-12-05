@@ -47,23 +47,26 @@ def build_charge_lmdb(inpath, outpath, use_tqdm = False, loud=False, probe_graph
     for fid, directory in enumerate(paths):
         if loud:
             print(directory)
-            
-        vcd = VaspChargeDensity(os.path.join(inpath, directory, 'CHGCAR'))
-        atoms = vcd.atoms[-1]
-        dens = vcd.chg[-1]
         
-        if stride != 1:
-            dens = dens[::stride, ::stride, ::stride]
+        try: 
+            vcd = VaspChargeDensity(os.path.join(inpath, directory, 'CHGCAR'))
+            atoms = vcd.atoms[-1]
+            dens = vcd.chg[-1]
 
-        data_object = a2g.convert(atoms)
-        data_object.charge_density = dens
-        
-        if probe_graph_adder is not None:
-            data_object = probe_graph_adder(object)
-        
-        txn = db.begin(write = True)
-        txn.put(f"{fid}".encode("ascii"), pickle.dumps(data_object,protocol=-1))
-        txn.commit()
+            if stride != 1:
+                dens = dens[::stride, ::stride, ::stride]
+
+            data_object = a2g.convert(atoms)
+            data_object.charge_density = dens
+
+            if probe_graph_adder is not None:
+                data_object = probe_graph_adder(object)
+
+            txn = db.begin(write = True)
+            txn.put(f"{fid}".encode("ascii"), pickle.dumps(data_object,protocol=-1))
+            txn.commit()
+        except:
+            print('Exception occured for:', directory)
     
     
     txn = db.begin(write = True)

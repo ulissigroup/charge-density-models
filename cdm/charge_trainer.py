@@ -217,7 +217,7 @@ class ChargeTrainer(BaseTrainer):
                 for subbatch in batch:
                     subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
                     subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
-            
+
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch)
 
@@ -484,7 +484,7 @@ class ChargeTrainer(BaseTrainer):
                 for subbatch in batch:
                     subbatch.probe_data = [pyg2_data_transform(x) for x in subbatch.probe_data]
                     subbatch.probe_data = Batch.from_data_list(subbatch.probe_data)
-                                                    
+
             # Forward.
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch)
