@@ -1,3 +1,3 @@
 Tools to build charge density models using [[https://github.com/Open-Catalyst-Project/ocp][ocpmodels]]
 
-Some important parts of the code are copied from [[https://github.com/peterbjorgensen/DeepDFT][DeepDFT]]. All of this code is contained in the chg_utils.py file, and the portions from DeepDFT are labelled.
+Many important ideas are taken from [[https://github.com/peterbjorgensen/DeepDFT][DeepDFT]]. Historically, much of the code was also borrowed from this repository, but that is no longer the case.
