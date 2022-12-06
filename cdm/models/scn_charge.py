@@ -176,8 +176,6 @@ class SCN_Charge(SCN):
             _,  # cell offset distances
             neighbors,
         ) = self.generate_graph(data)
-        
-        pdb.set_trace()
 
         ###############################################################
         # Initialize data structures
