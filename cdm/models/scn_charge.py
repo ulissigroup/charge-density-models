@@ -76,11 +76,11 @@ class SCN_Charge(SCN):
 
     def __init__(
         self,
-        max_num_neighbors=10000,
+        max_num_neighbors=1000000,
         cutoff=4.0,
         max_num_elements=90,
-        num_interactions=4,
-        lmax=3,
+        num_interactions=8,
+        lmax=6,
         mmax=1,
         num_resolutions=2,
         sphere_channels=128,
@@ -176,6 +176,8 @@ class SCN_Charge(SCN):
             _,  # cell offset distances
             neighbors,
         ) = self.generate_graph(data)
+        
+        pdb.set_trace()
 
         ###############################################################
         # Initialize data structures
@@ -183,7 +185,7 @@ class SCN_Charge(SCN):
 
         # Calculate which message block each edge should use. Based on edge distance rank.
         edge_rank = self._rank_edge_distances(
-            edge_distance, edge_index, self.max_num_neighbors
+            edge_distance, edge_index, self.max_num_neighbors, num_atoms
         )
 
         # Reorder edges so that they are grouped by distance rank (lowest to highest)
@@ -296,6 +298,51 @@ class SCN_Charge(SCN):
                     x[atom_indices] = data.atom_representations[i]
                     
             return x[probe_indices]
+        
+    def _rank_edge_distances(
+        self, edge_distance, edge_index, max_num_neighbors, num_atoms
+    ):
+        device = edge_distance.device
+        # Create an index map to map distances from atom_distance to distance_sort
+        # index_sort_map assumes index to be sorted
+        output, num_neighbors = torch.unique(edge_index[1], return_counts=True)
+        index_neighbor_offset = (
+            torch.cumsum(num_neighbors, dim=0) - num_neighbors
+        )
+        index_neighbor_offset_expand = torch.repeat_interleave(
+            index_neighbor_offset, num_neighbors
+        )
+
+        index_sort_map = (
+            edge_index[1] * max_num_neighbors
+            + torch.arange(len(edge_distance), device=device)
+            - index_neighbor_offset_expand
+        )
+
+        distance_sort = torch.full(
+            [num_atoms * max_num_neighbors], np.inf, device=device
+        )
+        distance_sort.index_copy_(0, index_sort_map, edge_distance)
+        distance_sort = distance_sort.view(num_atoms, max_num_neighbors)
+        no_op, index_sort = torch.sort(distance_sort, dim=1)
+
+        index_map = (
+            torch.arange(max_num_neighbors, device=device)
+            .view(1, -1)
+            .repeat(num_atoms, 1)
+            .view(-1)
+        )
+        index_sort = index_sort + (
+            torch.arange(num_atoms, device=device) * max_num_neighbors
+        ).view(-1, 1).repeat(1, max_num_neighbors)
+        edge_rank = torch.zeros_like(index_map)
+        edge_rank.index_copy_(0, index_sort.view(-1), index_map)
+        edge_rank = edge_rank.view(num_atoms, max_num_neighbors)
+
+        index_sort_mask = distance_sort.lt(1000.0)
+        edge_rank = torch.masked_select(edge_rank, index_sort_mask)
+
+        return edge_rank
 
     @property
     def num_params(self):
