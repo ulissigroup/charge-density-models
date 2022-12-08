@@ -7,7 +7,7 @@ from tqdm import tqdm
 import warnings
 
 from torch_geometric.data import Batch
-from torch_geometric.utils import remove_isolated_nodes
+from torch_geometric.utils import remove_isolated_nodes, sort_edge_index
 
 from ocpmodels.common.utils import conditional_grad
 from ocpmodels.common.registry import registry
@@ -115,6 +115,8 @@ class ChargeModel(torch.nn.Module):
     @conditional_grad(torch.enable_grad())        
     def forward_probe(self, data, atom_representations):
         data.atom_representations = atom_representations
+        data.edge_index = sort_edge_index(data.edge_index.flipud()).flipud()
+
         probe_representations = self.probe_message_model(data)
         probe_results = self.probe_output_function(probe_representations).flatten()
         probe_results = torch.nan_to_num(probe_results)

@@ -83,8 +83,8 @@ class SCN_Charge(SCN):
         lmax=6,
         mmax=1,
         num_resolutions=2,
-        sphere_channels=128,
-        sphere_channels_reduce=128,
+        #sphere_channels=128,
+        #sphere_channels_reduce=128,
         hidden_channels=256,
         num_taps=-1,
         use_grid=True,
@@ -94,7 +94,7 @@ class SCN_Charge(SCN):
         distance_function="gaussian",
         basis_width_scalar=1.0,
         distance_resolution=0.02,
-        show_timing_info=True,
+        show_timing_info=False,
         direct_forces=True,
         name='scn_charge',
         atomic=False,
@@ -114,8 +114,8 @@ class SCN_Charge(SCN):
             lmax = lmax,
             mmax = mmax,
             num_resolutions = num_resolutions,
-            sphere_channels = sphere_channels,  ##
-            sphere_channels_reduce = sphere_channels_reduce, ##
+            sphere_channels = hidden_channels,  ##
+            sphere_channels_reduce = hidden_channels, ##
             hidden_channels = hidden_channels, ##
             num_taps = num_taps,
             use_grid = use_grid,
@@ -165,6 +165,7 @@ class SCN_Charge(SCN):
     # restructure forward helper for conditional grad
     def _forward_helper(self, data):
         atomic_numbers = data.atomic_numbers.long()
+        
         num_atoms = len(atomic_numbers)
         pos = data.pos
 
@@ -181,9 +182,11 @@ class SCN_Charge(SCN):
         # Initialize data structures
         ###############################################################
 
+        #pdb.set_trace()
+        
         # Calculate which message block each edge should use. Based on edge distance rank.
         edge_rank = self._rank_edge_distances(
-            edge_distance, edge_index, self.max_num_neighbors, num_atoms
+            edge_distance, edge_index, self.max_num_neighbors,
         )
 
         # Reorder edges so that they are grouped by distance rank (lowest to highest)
@@ -295,15 +298,20 @@ class SCN_Charge(SCN):
                     )
                     x[atom_indices] = data.atom_representations[i]
                     
-            return x[probe_indices]
-        
+            
+            
+            return torch.sum(x[probe_indices], dim=1)
+    
     def _rank_edge_distances(
-        self, edge_distance, edge_index, max_num_neighbors, num_atoms
+        self, edge_distance, edge_index, max_num_neighbors
     ):
+        
         device = edge_distance.device
+        
         # Create an index map to map distances from atom_distance to distance_sort
         # index_sort_map assumes index to be sorted
         output, num_neighbors = torch.unique(edge_index[1], return_counts=True)
+        
         index_neighbor_offset = (
             torch.cumsum(num_neighbors, dim=0) - num_neighbors
         )
@@ -317,6 +325,7 @@ class SCN_Charge(SCN):
             - index_neighbor_offset_expand
         )
 
+        num_atoms = torch.max(edge_index) + 1
         distance_sort = torch.full(
             [num_atoms * max_num_neighbors], np.inf, device=device
         )
@@ -341,6 +350,7 @@ class SCN_Charge(SCN):
         edge_rank = torch.masked_select(edge_rank, index_sort_mask)
 
         return edge_rank
+    
 
     @property
     def num_params(self):
