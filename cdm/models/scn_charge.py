@@ -76,7 +76,7 @@ class SCN_Charge(SCN):
 
     def __init__(
         self,
-        max_num_neighbors=1000000,
+        max_num_neighbors=10000,
         cutoff=4.0,
         max_num_elements=90,
         num_interactions=8,
@@ -181,8 +181,6 @@ class SCN_Charge(SCN):
         ###############################################################
         # Initialize data structures
         ###############################################################
-
-        #pdb.set_trace()
         
         # Calculate which message block each edge should use. Based on edge distance rank.
         edge_rank = self._rank_edge_distances(
