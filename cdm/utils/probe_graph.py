@@ -56,11 +56,18 @@ class ProbeGraphAdder():
         # Handle batching
         if type(data_object.natoms) is not int:
             if len(data_object.natoms) > 1:
+                raise Exception(
+                    'Batch size >1 is not supported. \
+                    It is recommended to instead increase the number of probes per structure'
+                )
+                
+                '''
                 data_list = data_object.to_data_list()
                 batches = [data_list_collater([data]) for data in data_list]
                 probe_data = [self(batch).probe_data for batch in batches]
                 probe_data = data_list_collater(probe_data)
                 data_object.probe_data = probe_data
+                '''
                 return data_object
         
         # Use default options if none have been passed in
