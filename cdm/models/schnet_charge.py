@@ -49,6 +49,7 @@ class schnet_charge(SchNet):
         )
         self.atomic = atomic
         self.probe = probe
+        self.num_interactions = num_interactions
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):

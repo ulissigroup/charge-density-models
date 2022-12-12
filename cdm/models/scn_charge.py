@@ -131,6 +131,7 @@ class SCN_Charge(SCN):
         
         self.atomic = atomic
         self.probe = probe
+        self.num_interactions = num_interactions
 
         
 

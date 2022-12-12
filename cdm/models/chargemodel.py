@@ -30,7 +30,6 @@ class ChargeModel(torch.nn.Module):
                           'stride': 1,
                           'implementation': 'RGPBC',
                          },
-        num_interactions = 5,
         atom_channels = 128,
         probe_channels = 128,
         include_atomic_edges = False,
@@ -55,15 +54,19 @@ class ChargeModel(torch.nn.Module):
             )
 
         
-        self.atom_message_model = registry.get_model_class(atom_model_config['name'])(**atom_model_config, atomic=True, 
-                      probe=False,
-                      hidden_channels = atom_channels,
-                      num_interactions = num_interactions)
+        self.atom_message_model = registry.get_model_class(atom_model_config['name'])(
+            **atom_model_config,
+            atomic=True, 
+            probe=False,
+            hidden_channels = atom_channels,
+        )
         
-        self.probe_message_model = registry.get_model_class(probe_model_config['name'])(**probe_model_config, atomic=False,
-                       probe=True,
-                       hidden_channels = probe_channels, 
-                       num_interactions = num_interactions)
+        self.probe_message_model = registry.get_model_class(probe_model_config['name'])(
+            **probe_model_config,
+            atomic=False,
+            probe=True,
+            hidden_channels = probe_channels,
+        )
         
         if atom_model_config['name'] == 'gemnet_charge' or probe_model_config['name'] == 'gemnet_charge':
             self.include_atomic_edges = True
@@ -78,6 +81,8 @@ class ChargeModel(torch.nn.Module):
                 torch.nn.Linear(atom_channels, probe_channels))
         else:
             self.reduce_atom_representations = False
+            
+        assert self.atom_message_model.num_interactions >= self.probe_message_model.num_interactions
             
         self.otf_pga = ProbeGraphAdder(
             num_probes = otf_pga_config['num_probes'],
@@ -114,7 +119,7 @@ class ChargeModel(torch.nn.Module):
             
     @conditional_grad(torch.enable_grad())        
     def forward_probe(self, data, atom_representations):
-        data.atom_representations = atom_representations
+        data.atom_representations = atom_representations[-self.probe_message_model.num_interactions]
         data.edge_index = sort_edge_index(data.edge_index.flipud()).flipud()
         
         probe_results = self.probe_message_model(data)
