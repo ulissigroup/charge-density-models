@@ -26,8 +26,6 @@ from cdm.utils.probe_graph import ProbeGraphAdder
 from cdm import models
 from torch_geometric.data import Batch
 
-import pdb
-import time
 
 @registry.register_trainer("charge")
 class ChargeTrainer(BaseTrainer):
