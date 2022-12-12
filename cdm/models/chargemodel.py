@@ -16,7 +16,6 @@ from ocpmodels.common.utils import pyg2_data_transform
 
 from cdm.utils.probe_graph import ProbeGraphAdder
 
-import pdb
 
 @registry.register_model("charge_model")
 class ChargeModel(torch.nn.Module):
