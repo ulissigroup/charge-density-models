@@ -13,8 +13,6 @@ from ocpmodels.common.utils import (
     radius_graph_pbc,
 )
 
-import pdb
-
 @registry.register_model("schnet_charge")
 class schnet_charge(SchNet):
     def __init__(
