@@ -296,9 +296,30 @@ class SCN_Charge(SCN):
                     )
                     x[atom_indices] = data.atom_representations[i]
                     
+            ###############################################################
+            # Predict electron density
+            ###############################################################
             
-            
-            return torch.sum(x[probe_indices], dim=1)
+             # Create a roughly evenly distributed point sampling of the sphere
+            sphere_points = CalcSpherePoints(
+                self.num_sphere_samples, x.device
+            ).detach()
+            sphharm_weights = o3.spherical_harmonics(
+                torch.arange(0, self.lmax + 1).tolist(), sphere_points, False
+            ).detach()
+
+            # Density estimation
+            node_energy = torch.einsum(
+                "abc, pb->apc", x, sphharm_weights
+            ).contiguous()
+            node_energy = node_energy.view(-1, self.sphere_channels)
+            node_energy = self.act(self.energy_fc1(node_energy))
+            node_energy = self.act(self.energy_fc2(node_energy))
+            node_energy = self.energy_fc3(node_energy)
+            node_energy = node_energy.view(-1, self.num_sphere_samples, 1)
+            node_density = torch.sum(node_energy, dim=1) / self.num_sphere_samples
+
+            return node_density[probe_indices]
     
     def _rank_edge_distances(
         self, edge_distance, edge_index, max_num_neighbors

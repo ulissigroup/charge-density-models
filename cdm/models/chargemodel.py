@@ -43,12 +43,17 @@ class ChargeModel(torch.nn.Module):
         self.regress_forces = False
         self.enforce_zero_for_disconnected_probes = enforce_zero_for_disconnected_probes
         self.enforce_charge_conservation = enforce_charge_conservation
+        probe_final_mlp = True
         
-        self.probe_output_function = torch.nn.Sequential(
-            torch.nn.Linear(probe_channels, probe_channels),
-            torch.nn.ELU(),
-            torch.nn.Linear(probe_channels, 1)
-        )
+        if probe_model_config['name'] == 'scn_charge':
+            probe_final_mlp = False
+        
+        if probe_final_mlp:
+            self.probe_output_function = torch.nn.Sequential(
+                torch.nn.Linear(probe_channels, probe_channels),
+                torch.nn.ELU(),
+                torch.nn.Linear(probe_channels, 1)
+            )
 
         
         self.atom_message_model = registry.get_model_class(atom_model_config['name'])(**atom_model_config, atomic=True, 
@@ -98,10 +103,6 @@ class ChargeModel(torch.nn.Module):
         probes = self.forward_probe(data.probe_data, atom_representations)
         
         return probes
-        
-    @property
-    def num_params(self):
-        return sum(p.numel() for p in self.parameters())
     
     @conditional_grad(torch.enable_grad())
     def forward_atomic(self, data):
@@ -116,9 +117,12 @@ class ChargeModel(torch.nn.Module):
     def forward_probe(self, data, atom_representations):
         data.atom_representations = atom_representations
         data.edge_index = sort_edge_index(data.edge_index.flipud()).flipud()
-
-        probe_representations = self.probe_message_model(data)
-        probe_results = self.probe_output_function(probe_representations).flatten()
+        
+        probe_results = self.probe_message_model(data)
+        
+        if hasattr(self, 'probe_output_function'):
+            probe_results = self.probe_output_function(probe_results).flatten()
+            
         probe_results = torch.nan_to_num(probe_results)
         
         if self.enforce_zero_for_disconnected_probes:
@@ -135,3 +139,7 @@ class ChargeModel(torch.nn.Module):
                 probe_results *= data.total_target / torch.sum(probe_results)
         
         return probe_results
+    
+    @property
+    def num_params(self):
+        return sum(p.numel() for p in self.parameters())
