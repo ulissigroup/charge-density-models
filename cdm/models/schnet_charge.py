@@ -17,38 +17,22 @@ from ocpmodels.common.utils import (
 class schnet_charge(SchNet):
     def __init__(
         self,
-        use_pbc=True,
-        regress_forces=False,
-        otf_graph=False,
-        
-        hidden_channels=128,
-        num_filters=128,
-        num_interactions=6,
-        num_gaussians=50,
-        cutoff=10.0,
-        readout="add",
-        
-        atomic=False,
-        probe=False,
         name='schnet_charge',
+        **kwargs,
     ):
 
+        self.atomic = kwargs['atomic']
+        self.probe = kwargs['probe']
+        kwargs.pop('atomic')
+        kwargs.pop('probe')
+                 
         super().__init__(
             num_atoms = 1,
             bond_feat_dim = 1,
             num_targets = 1,
-            use_pbc=True,
-            regress_forces=False,
-            otf_graph=False,
-            hidden_channels=hidden_channels,
-            num_filters=num_filters,
-            num_interactions=num_interactions,
-            num_gaussians=num_gaussians,
-            cutoff=cutoff,
-            readout=readout
+            otf_graph = False,
+            **kwargs,
         )
-        self.atomic = atomic
-        self.probe = probe
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -89,7 +73,7 @@ class schnet_charge(SchNet):
             edge_attr = edge_attr.float()
             
             for interaction_number, interaction in enumerate(self.interactions):
-                h = h + interaction(h, edge_index, edge_weight, edge_attr)
                 h[atom_indices] = data.atom_representations[interaction_number]
+                h = h + interaction(h, edge_index, edge_weight, edge_attr)
 
             return h[probe_indices]
