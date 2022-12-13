@@ -76,64 +76,23 @@ class SCN_Charge(SCN):
 
     def __init__(
         self,
-        max_num_neighbors=10000,
-        cutoff=4.0,
-        max_num_elements=90,
-        num_interactions=8,
-        lmax=6,
-        mmax=1,
-        num_resolutions=2,
-        #sphere_channels=128,
-        #sphere_channels_reduce=128,
-        hidden_channels=256,
-        num_taps=-1,
-        use_grid=True,
-        num_bands=1,
-        num_sphere_samples=128,
-        num_basis_functions=128,
-        distance_function="gaussian",
-        basis_width_scalar=1.0,
-        distance_resolution=0.02,
-        show_timing_info=False,
-        direct_forces=True,
-        name='scn_charge',
-        atomic=False,
-        probe=False,
+        name = 'scn_charge',
+        **kwargs,
     ):
+        
+        self.atomic = kwargs['atomic']
+        self.probe = kwargs['probe']
+        kwargs.pop('atomic')
+        kwargs.pop('probe')
+                 
         super().__init__(
             num_atoms = 1,
             bond_feat_dim = 1,
             num_targets = 1,
-            use_pbc = True,
-            regress_forces = False,
             otf_graph = False,
-            max_num_neighbors = max_num_neighbors,
-            cutoff = cutoff,
-            max_num_elements = max_num_elements,
-            num_interactions = num_interactions,
-            lmax = lmax,
-            mmax = mmax,
-            num_resolutions = num_resolutions,
-            sphere_channels = hidden_channels,  ##
-            sphere_channels_reduce = hidden_channels, ##
-            hidden_channels = hidden_channels, ##
-            num_taps = num_taps,
-            use_grid = use_grid,
-            num_bands = num_bands,
-            num_sphere_samples = num_sphere_samples,
-            num_basis_functions = num_basis_functions,
-            distance_function = distance_function,
-            basis_width_scalar = basis_width_scalar,
-            distance_resolution = distance_resolution,
-            show_timing_info = show_timing_info,
-            direct_forces = direct_forces,
+            **kwargs,
         )
-        
-        self.atomic = atomic
-        self.probe = probe
-        self.num_interactions = num_interactions
 
-        
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):

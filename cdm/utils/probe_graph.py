@@ -17,7 +17,7 @@ class ProbeGraphAdder():
     a 3-dimensional tensor of charge density values
     '''
     def __init__(self, 
-                 num_probes=1000, 
+                 num_probes=10000, 
                  cutoff=5, 
                  include_atomic_edges=False, 
                  mode = 'random', 

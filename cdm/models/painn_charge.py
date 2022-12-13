@@ -3,6 +3,8 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 
+import pdb
+
 from ocpmodels.common.registry import registry
 import torch
 from ocpmodels.models.painn.painn import PaiNN
@@ -18,47 +20,27 @@ from ocpmodels.common.utils import (
 class PaiNN_Charge(PaiNN):
     def __init__(
         self,
-        use_pbc = True,
-        regress_forces = False,
-        direct_forces = False,
-        otf_graph = False,
-        
-        hidden_channels = 128,
-        num_interactions = 3,
-        num_rbf = 32,
-        cutoff = 5,
-        max_neighbors = 1e6,
-        rbf: dict = {"name": "gaussian"},
-        envelope: dict = {"name": "polynomial", "exponent": 5},
-        scale_file: Optional[str] = None,
-        num_elements = 83 + 1, #+1 for probe embedding
-        
-        atomic = False,
-        probe = False,
         name = 'painn_charge',
+        **kwargs,
     ):
         
+        self.atomic = kwargs['atomic']
+        self.probe = kwargs['probe']
+        kwargs.pop('atomic')
+        kwargs.pop('probe')
+        
+        if self.probe:
+            kwargs['num_elements'] = 84
+                 
         super().__init__(
             num_atoms = 1,
             bond_feat_dim = 1,
             num_targets = 1,
-            hidden_channels = hidden_channels,
-            num_layers = num_interactions,
-            num_rbf = num_rbf,
-            cutoff = cutoff,
-            max_neighbors = max_neighbors,
-            rbf = rbf,
-            envelope = envelope,
-            scale_file = scale_file,
-            regress_forces = regress_forces,
-            direct_forces = direct_forces,
-            use_pbc = use_pbc,
-            otf_graph = otf_graph,
-            num_elements = num_elements,
+            otf_graph = False,
+            **kwargs,
         )
-        self.atomic = atomic
-        self.probe = probe
-        self.num_interactions = num_interactions
+        
+        self.num_interactions = self.num_layers
         
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -83,12 +65,13 @@ class PaiNN_Charge(PaiNN):
 
         edge_rbf = self.radial_basis(edge_dist)  # rbf * envelope
 
-        x = self.atom_emb(z + 1) # +1 to allow probe embeddings
-        vec = torch.zeros(x.size(0), 3, x.size(1), device=x.device)
 
         #### Interaction blocks ###############################################
 
         if self.atomic:
+            x = self.atom_emb(z)
+            vec = torch.zeros(x.size(0), 3, x.size(1), device=x.device)
+            
             x_list = []
             for i in range(self.num_layers):
                 dx, dvec = self.message_layers[i](
@@ -111,10 +94,15 @@ class PaiNN_Charge(PaiNN):
             return atom_representations
             
         if self.probe:
+            x = self.atom_emb(z + 1) # +1 allows for probe embeddings
+            vec = torch.zeros(x.size(0), 3, x.size(1), device=x.device)
+            
             atom_indices = torch.nonzero(z).flatten()
             probe_indices = (z == 0).nonzero().flatten()
 
             for i in range(self.num_layers):
+                x[atom_indices] = data.atom_representations[i]
+                
                 dx, dvec = self.message_layers[i](
                     x, vec, edge_index, edge_rbf, edge_vector
                 )
@@ -128,7 +116,5 @@ class PaiNN_Charge(PaiNN):
                 x = x + dx
                 vec = vec + dvec
                 x = getattr(self, "upd_out_scalar_scale_%d" % i)(x)
-                
-                x[atom_indices] = data.atom_representations[i]
                 
             return x[probe_indices]
