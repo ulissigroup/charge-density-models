@@ -19,14 +19,16 @@ from ocpmodels.common.utils import load_state_dict
 from cdm.utils.probe_graph import ProbeGraphAdder
 
 
-@registry.register_model("charge_model")
+@registry.register_model('charge_model')
 class ChargeModel(torch.nn.Module):
     def __init__(
         self,
         atom_model_config,
         probe_model_config,
-        otf_pga_config = {},
-        include_atomic_edges = False,
+        otf_pga_config = {
+            'implementation': 'RGPBC',
+        },
+        include_atomic_edg es = False,
         enforce_zero_for_disconnected_probes = False,
         enforce_charge_conservation = False,
         freeze_atomic = False,
@@ -108,12 +110,6 @@ class ChargeModel(torch.nn.Module):
                 torch.nn.ELU(),
                 torch.nn.Linear(self.probe_message_model.hidden_channels, 1)
             )
-            
-        if atom_model_config['name'] == 'gemnet_charge' or probe_model_config['name'] == 'gemnet_charge':
-            self.include_atomic_edges = True
-        else:
-            self.include_atomic_edges = False
-            
             
         self.otf_pga = ProbeGraphAdder(**otf_pga_config)
         
