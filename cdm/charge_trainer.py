@@ -118,24 +118,24 @@ class ChargeTrainer(BaseTrainer):
     
     def load_loss(self):
         self.loss_fn = {}
-        #self.loss_fn["energy"] = self.config["optim"].get("loss_energy", "mae")
-        #self.loss_fn["force"] = self.config["optim"].get("loss_force", "mae")
-        self.loss_fn["charge"] = self.config["optim"].get("loss_charge", "mae")
+        self.loss_fn['charge'] = self.config['optim'].get('loss_charge', 'mae')
         
         for loss, loss_name in self.loss_fn.items():
-            if loss_name in ["l1", "mae"]:
+            if loss_name in ['l1', 'mae']:
                 self.loss_fn[loss] = torch.nn.L1Loss()
-            elif loss_name == "mse":
+            elif loss_name == 'mse':
                 self.loss_fn[loss] = torch.nn.MSELoss()
-            elif loss_name == "l2mae":
+            elif loss_name == 'l2mae':
                 self.loss_fn[loss] = L2MAELoss()
-            elif loss_name == "atomwisel2":
+            elif loss_name == 'atomwisel2':
                 self.loss_fn[loss] = AtomwiseL2Loss()
+            elif loss_name == 'normed_mae':
+                self.loss_fn[loss] = NormedMAELoss()
             else:
                 raise NotImplementedError(
-                    f"Unknown loss function name: {loss_name}"
+                    f'Unknown loss function name: {loss_name}'
                 )
-            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss])
+            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss], reduction='sum')
         
 
     def load_task(self):
@@ -147,7 +147,7 @@ class ChargeTrainer(BaseTrainer):
         self, loader, per_image=True, results_file=None, disable_tqdm=False
     ):
         if distutils.is_master() and not disable_tqdm:
-            logging.info("Predicting on test.")
+            logging.info('Predicting on test.')
         assert isinstance(
             loader,
             (
@@ -165,15 +165,15 @@ class ChargeTrainer(BaseTrainer):
             self.ema.store()
             self.ema.copy_to()
 
-        if self.normalizers is not None and "target" in self.normalizers:
-            self.normalizers["target"].to(self.device)
-        predictions = {"id": [], "charge": []}
+        if self.normalizers is not None and 'target' in self.normalizers:
+            self.normalizers['target'].to(self.device)
+        predictions = {'id': [], 'charge': []}
 
         for i, batch in tqdm(
             enumerate(loader),
             total=len(loader),
             position=rank,
-            desc="device {}".format(rank),
+            desc='device {}'.format(rank),
             disable=disable_tqdm,
         ):
             
@@ -185,21 +185,21 @@ class ChargeTrainer(BaseTrainer):
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch)
 
-            if self.normalizers is not None and "target" in self.normalizers:
-                out["charge"] = self.normalizers["target"].denorm(
-                    out["charge"]
+            if self.normalizers is not None and 'target' in self.normalizers:
+                out['charge'] = self.normalizers['target'].denorm(
+                    out['charge']
                 )
 
             if per_image:
-                predictions["id"].extend(
+                predictions['id'].extend(
                     [str(i) for i in batch[0].sid.tolist()]
                 )
-                predictions["charge"].extend(out["charge"].tolist())
+                predictions['charge'].extend(out['charge'].tolist())
             else:
-                predictions["charge"] = out["charge"].detach()
+                predictions['charge'] = out['charge'].detach()
                 return predictions
 
-        self.save_results(predictions, results_file, keys=["charge"])
+        self.save_results(predictions, results_file, keys=['charge'])
 
         if self.ema:
             self.ema.restore()
@@ -207,11 +207,11 @@ class ChargeTrainer(BaseTrainer):
         return predictions
 
     def train(self, disable_eval_tqdm=False):
-        eval_every = self.config["optim"].get(
-            "eval_every", len(self.train_loader)
+        eval_every = self.config['optim'].get(
+            'eval_every', len(self.train_loader)
         )
-        primary_metric = self.config["task"].get(
-            "primary_metric", self.evaluator.task_primary_metric[self.name]
+        primary_metric = self.config['task'].get(
+            'primary_metric', self.evaluator.task_primary_metric[self.name]
         )
         self.best_val_metric = 1e9
 
@@ -220,7 +220,7 @@ class ChargeTrainer(BaseTrainer):
         start_epoch = self.step // len(self.train_loader)
 
         for epoch_int in range(
-            start_epoch, self.config["optim"]["max_epochs"]
+            start_epoch, self.config['optim']['max_epochs']
         ):
             self.train_sampler.set_epoch(epoch_int)
             skip_steps = self.step % len(self.train_loader)
@@ -259,65 +259,65 @@ class ChargeTrainer(BaseTrainer):
                     metrics={},
                 )
                 self.metrics = self.evaluator.update(
-                    "loss", loss.item() / scale, self.metrics
+                    'loss', loss.item() / scale, self.metrics
                 )
 
                 # Log metrics.
-                log_dict = {k: self.metrics[k]["metric"] for k in self.metrics}
+                log_dict = {k: self.metrics[k]['metric'] for k in self.metrics}
                 log_dict.update(
                     {
-                        "lr": self.scheduler.get_lr(),
-                        "epoch": self.epoch,
-                        "step": self.step,
+                        'lr': self.scheduler.get_lr(),
+                        'epoch': self.epoch,
+                        'step': self.step,
                     }
                 )
                 if (
-                    self.step % self.config["cmd"]["print_every"] == 0
+                    self.step % self.config['cmd']['print_every'] == 0
                     and distutils.is_master()
                     and not self.is_hpo
                 ):
                     log_str = [
-                        "{}: {:.2e}".format(k, v) for k, v in log_dict.items()
+                        '{}: {:.2e}'.format(k, v) for k, v in log_dict.items()
                     ]
-                    print(", ".join(log_str))
+                    print(', '.join(log_str))
                     self.metrics = {}
 
                 if self.logger is not None:
                     self.logger.log(
                         log_dict,
                         step=self.step,
-                        split="train",
+                        split='train',
                     )
 
                 # Evaluate on val set after every `eval_every` iterations.
                 if self.step % eval_every == 0:
                     self.save(
-                        checkpoint_file="checkpoint.pt", training_state=True
+                        checkpoint_file='checkpoint.pt', training_state=True
                     )
 
                     if self.val_loader is not None:
                         val_metrics = self.validate(
-                            split="val",
+                            split='val',
                             disable_tqdm=disable_eval_tqdm,
                         )
                         if (
                             val_metrics[
                                 self.evaluator.task_primary_metric[self.name]
-                            ]["metric"]
+                            ]['metric']
                             < self.best_val_metric
                         ):
                             self.best_val_metric = val_metrics[
                                 self.evaluator.task_primary_metric[self.name]
-                            ]["metric"]
+                            ]['metric']
                             self.save(
                                 metrics=val_metrics,
-                                checkpoint_file="best_checkpoint.pt",
+                                checkpoint_file='best_checkpoint.pt',
                                 training_state=False,
                             )
                             if self.test_loader is not None:
                                 self.predict(
                                     self.test_loader,
-                                    results_file="predictions",
+                                    results_file='predictions',
                                     disable_tqdm=False,
                                 )
 
@@ -329,10 +329,10 @@ class ChargeTrainer(BaseTrainer):
                                 val_metrics,
                             )
 
-                if self.scheduler.scheduler_type == "ReduceLROnPlateau":
+                if self.scheduler.scheduler_type == 'ReduceLROnPlateau':
                     if self.step % eval_every == 0:
                         self.scheduler.step(
-                            metrics=val_metrics[primary_metric]["metric"],
+                            metrics=val_metrics[primary_metric]['metric'],
                         )
                 else:
                     self.scheduler.step()
@@ -340,9 +340,9 @@ class ChargeTrainer(BaseTrainer):
             torch.cuda.empty_cache()
 
         self.train_dataset.close_db()
-        if self.config.get("val_dataset", False):
+        if self.config.get('val_dataset', False):
             self.val_dataset.close_db()
-        if self.config.get("test_dataset", False):
+        if self.config.get('test_dataset', False):
             self.test_dataset.close_db()
 
     def _forward(self, batch_list):
@@ -352,7 +352,7 @@ class ChargeTrainer(BaseTrainer):
             output = output.view(-1)
 
         return {
-            "charge": output,
+            'charge': output,
         }
 
     def _compute_loss(self, out, batch_list):
@@ -361,12 +361,12 @@ class ChargeTrainer(BaseTrainer):
             [batch.probe_data.target for batch in batch_list], dim=0
         )
 
-        if self.normalizer.get("normalize_labels", False):
-            target_normed = self.normalizers["target"].norm(charge_target)
+        if self.normalizer.get('normalize_labels', False):
+            target_normed = self.normalizers['target'].norm(charge_target)
         else:
             target_normed = charge_target
 
-        loss = self.loss_fn["charge"](out["charge"], target_normed)
+        loss = self.loss_fn['charge'](out['charge'], target_normed)
         return loss
 
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
@@ -374,12 +374,12 @@ class ChargeTrainer(BaseTrainer):
              [batch.probe_data.target for batch in batch_list], dim=0
         )
 
-        if self.normalizer.get("normalize_labels", False):
-            out["charge"] = self.normalizers["target"].denorm(out["charge"])
+        if self.normalizer.get('normalize_labels', False):
+            out['charge'] = self.normalizers['target'].denorm(out['charge'])
         
         metrics = evaluator.eval(
             out,
-            {"charge": charge_target},
+            {'charge': charge_target},
             prev_metrics=metrics,
         )
 
@@ -392,20 +392,20 @@ class ChargeTrainer(BaseTrainer):
 
         # TODO: depreicated, remove.
         bond_feat_dim = None
-        bond_feat_dim = self.config["model_attributes"].get(
-            "num_gaussians", 50
+        bond_feat_dim = self.config['model_attributes'].get(
+            'num_gaussians', 50
         )
 
         loader = self.train_loader or self.val_loader or self.test_loader
         
-        self.model = registry.get_model_class(self.config["model"])(
-            **self.config["model_attributes"],
+        self.model = registry.get_model_class(self.config['model'])(
+            **self.config['model_attributes'],
         ).to(self.device)
 
         if distutils.is_master():
             logging.info(
-                f"Loaded {self.model.__class__.__name__} with "
-                f"{self.model.num_params} parameters."
+                f'Loaded {self.model.__class__.__name__} with '
+                f'{self.model.num_params} parameters.'
             )
 
         if self.logger is not None:
@@ -416,14 +416,14 @@ class ChargeTrainer(BaseTrainer):
             output_device=self.device,
             num_gpus=1 if not self.cpu else 0,
         )
-        if distutils.initialized() and not self.config["noddp"]:
+        if distutils.initialized() and not self.config['noddp']:
             self.model = DistributedDataParallel(
                 self.model, device_ids=[self.device]
             )
     @torch.no_grad()
-    def validate(self, split="val", disable_tqdm=False):
+    def validate(self, split='val', disable_tqdm=False):
         if distutils.is_master():
-            logging.info(f"Evaluating on {split}.")
+            logging.info(f'Evaluating on {split}.')
         if self.is_hpo:
             disable_tqdm = True
 
@@ -435,13 +435,13 @@ class ChargeTrainer(BaseTrainer):
         evaluator, metrics = ChargeEvaluator(task='charge'), {}
         rank = distutils.get_rank()
 
-        loader = self.val_loader if split == "val" else self.test_loader
+        loader = self.val_loader if split =='val' else self.test_loader
         
         for i, batch in tqdm(
             enumerate(loader),
             total=len(loader),
             position=rank,
-            desc="device {}".format(rank),
+            desc='device {}'.format(rank),
             disable=disable_tqdm,
         ):
             if hasattr(batch[0], 'probe_data'):
@@ -456,28 +456,28 @@ class ChargeTrainer(BaseTrainer):
 
             # Compute metrics.
             metrics = self._compute_metrics(out, batch, evaluator, metrics)
-            metrics = evaluator.update("loss", loss.item(), metrics)
+            metrics = evaluator.update('loss', loss.item(), metrics)
 
         aggregated_metrics = {}
         for k in metrics:
             aggregated_metrics[k] = {
-                "total": distutils.all_reduce(
-                    metrics[k]["total"], average=False, device=self.device
+                'total': distutils.all_reduce(
+                    metrics[k]['total'], average=False, device=self.device
                 ),
-                "numel": distutils.all_reduce(
-                    metrics[k]["numel"], average=False, device=self.device
+                'numel': distutils.all_reduce(
+                    metrics[k]['numel'], average=False, device=self.device
                 ),
             }
-            aggregated_metrics[k]["metric"] = (
-                aggregated_metrics[k]["total"] / aggregated_metrics[k]["numel"]
+            aggregated_metrics[k]['metric'] = (
+                aggregated_metrics[k]['total'] / aggregated_metrics[k]['numel']
             )
         metrics = aggregated_metrics
 
-        log_dict = {k: metrics[k]["metric"] for k in metrics}
-        log_dict.update({"epoch": self.epoch})
+        log_dict = {k: metrics[k]['metric'] for k in metrics}
+        log_dict.update({'epoch': self.epoch})
         if distutils.is_master():
-            log_str = ["{}: {:.4f}".format(k, v) for k, v in log_dict.items()]
-            logging.info(", ".join(log_str))
+            log_str = ['{}: {:.4f}'.format(k, v) for k, v in log_dict.items()]
+            logging.info(', '.join(log_str))
 
         # Make plots.
         if self.logger is not None:
@@ -493,20 +493,24 @@ class ChargeTrainer(BaseTrainer):
         return metrics
     
     def load_datasets(self):
+        
+        self.config['optim']['batch_size'] = 1
+        self.config['optim']['eval_batch_size'] = 1
+        
         self.parallel_collater = ParallelCollater(
             0 if self.cpu else 1,
-            self.config["model_attributes"].get("otf_graph", False),
+            self.config['model_attributes'].get('otf_graph', False),
         )
 
         self.train_loader = self.val_loader = self.test_loader = None
 
-        if self.config.get("dataset", None):
+        if self.config.get('dataset', None):
             self.train_dataset = registry.get_dataset_class(
-                self.config["task"]["dataset"]
-            )(self.config["dataset"], transform = self.pga)
+                self.config['task']['dataset']
+            )(self.config['dataset'], transform = self.pga)
             self.train_sampler = self.get_sampler(
                 self.train_dataset,
-                self.config["optim"]["batch_size"],
+                self.config['optim']['batch_size'],
                 shuffle=True,
             )
             self.train_loader = self.get_dataloader(
@@ -514,14 +518,14 @@ class ChargeTrainer(BaseTrainer):
                 self.train_sampler,
             )
 
-            if self.config.get("val_dataset", None):
+            if self.config.get('val_dataset', None):
                 self.val_dataset = registry.get_dataset_class(
-                    self.config["task"]["dataset"]
-                )(self.config["val_dataset"], transform = self.pga)
+                    self.config['task']['dataset']
+                )(self.config['val_dataset'], transform = self.pga)
                 self.val_sampler = self.get_sampler(
                     self.val_dataset,
-                    self.config["optim"].get(
-                        "eval_batch_size", self.config["optim"]["batch_size"]
+                    self.config['optim'].get(
+                        'eval_batch_size', self.config['optim']['batch_size']
                     ),
                     shuffle=False,
                 )
@@ -530,14 +534,14 @@ class ChargeTrainer(BaseTrainer):
                     self.val_sampler,
                 )
 
-            if self.config.get("test_dataset", None):
+            if self.config.get('test_dataset', None):
                 self.test_dataset = registry.get_dataset_class(
-                    self.config["task"]["dataset"]
-                )(self.config["test_dataset"], transform = self.pga)
+                    self.config['task']['dataset']
+                )(self.config['test_dataset'], transform = self.pga)
                 self.test_sampler = self.get_sampler(
                     self.test_dataset,
-                    self.config["optim"].get(
-                        "eval_batch_size", self.config["optim"]["batch_size"]
+                    self.config['optim'].get(
+                        'eval_batch_size', self.config['optim']['batch_size']
                     ),
                     shuffle=False,
                 )
@@ -549,11 +553,11 @@ class ChargeTrainer(BaseTrainer):
         # Normalizer for the dataset.
         # Compute mean, std of training set labels.
         self.normalizers = {}
-        if self.normalizer.get("normalize_labels", False):
-            if "target_mean" in self.normalizer:
-                self.normalizers["target"] = Normalizer(
-                    mean=self.normalizer["target_mean"],
-                    std=self.normalizer["target_std"],
+        if self.normalizer.get('normalize_labels', False):
+            if 'target_mean' in self.normalizer:
+                self.normalizers['target'] = Normalizer(
+                    mean=self.normalizer['target_mean'],
+                    std=self.normalizer['target_std'],
                     device=self.device,
                 )
             else:
@@ -569,9 +573,17 @@ class ChargeEvaluator(Evaluator):
     def __init__(self, task = 'charge'):
         self.task = 'charge'
         
-        self.task_metrics['charge'] = ['charge_mse', 'charge_mae', 'charge_fe', 'true_density', 'total_charge_ratio']
+        self.task_metrics['charge'] = [
+            'norm_charge_mae',
+            'norm_charge_rmse',
+            'charge_mae',
+            'charge_mse',
+            'true_density',
+            'total_charge_ratio',
+        ]
+        
         self.task_attributes['charge'] = ['charge']
-        self.task_primary_metric['charge'] = 'charge_mae'
+        self.task_primary_metric['charge'] = 'norm_charge_mae'
         
         self.metric_fn = self.task_metrics[task]
         
@@ -589,20 +601,32 @@ class ChargeEvaluator(Evaluator):
 
         return metrics
     
+class NormedMAELoss(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(
+        self,
+        prediction,
+        target,
+    ):
+        
+        return torch.sum(torch.abs(prediction - target)) \
+             / torch.sum(torch.abs(target))
+    
 def absolute_error(prediction, target):
     error = torch.abs(prediction - target)
     return {
-        "metric": (torch.mean(error)).item(),
-        "total": torch.sum(error).item(),
-        "numel": prediction.numel(),
+        'metric': (torch.mean(error)).item(),
+        'total': torch.sum(error).item(),
+        'numel': prediction.numel(),
     }
 
 def squared_error(prediction, target):
     error = torch.abs(prediction - target) **2
     return {
-        "metric": (torch.mean(error)).item(),
-        "total": torch.sum(error).item(),
-        "numel": prediction.numel(),
+        'metric': (torch.mean(error)).item(),
+        'total': torch.sum(error).item(),
+        'numel': prediction.numel(),
     }
 
 def charge_mae(prediction, target):
@@ -611,26 +635,36 @@ def charge_mae(prediction, target):
 def charge_mse(prediction, target):
     return squared_error(prediction['charge'].float(), target['charge'].float())
 
-# Fractional Error
-def charge_fe(prediction, target):
-    error = torch.abs(prediction['charge'] - target['charge']) / torch.sum(target['charge'])
-    return {
-        "metric": (torch.sum(error)).item(),
-        "total": (torch.sum(error)).item(),
-        "numel": prediction['charge'].numel(),
-    }
 
 def total_charge_ratio(prediction, target):
     error = torch.sum(prediction['charge']) / torch.sum(target['charge'])
     return {
-        "metric": torch.mean(error).item(),
-        "total": torch.sum(error).item(),
-        "numel": error.numel()
+        'metric': torch.mean(error).item(),
+        'total': torch.sum(error).item(),
+        'numel': error.numel()
     }
 
 def true_density(prediction, target):
     return {
-        "metric": torch.mean(target['charge']).item(),
-        "total": torch.sum(target['charge']).item(),
-        "numel": target['charge'].numel(),
+        'metric': torch.mean(target['charge']).item(),
+        'total': torch.sum(target['charge']).item(),
+        'numel': target['charge'].numel(),
+    }
+
+def norm_charge_mae(prediction, target):
+    error = torch.sum(torch.abs(prediction['charge'] - target['charge'])) \
+          / torch.sum(torch.abs(target['charge']))
+    return {
+        'metric': error.item(),
+        'total':  error.item(),
+        'numel':  1,
+    }
+        
+def norm_charge_rmse(prediction, target):
+    error = torch.sqrt(torch.sum(torch.square(prediction['charge'] - target['charge'])) \
+          / torch.sum(torch.abs(target['charge'])))
+    return {
+        'metric': error.item(),
+        'total':  error.item(),
+        'numel':  1,
     }
