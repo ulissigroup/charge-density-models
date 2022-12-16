@@ -28,7 +28,7 @@ class ChargeModel(torch.nn.Module):
         otf_pga_config = {
             'implementation': 'RGPBC',
         },
-        include_atomic_edg es = False,
+        include_atomic_edges = False,
         enforce_zero_for_disconnected_probes = False,
         enforce_charge_conservation = False,
         freeze_atomic = False,
