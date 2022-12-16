@@ -97,7 +97,7 @@ class ChargeModel(torch.nn.Module):
                 torch.nn.Linear(self.atom_message_model.hidden_channels, self.probe_message_model.hidden_channels))
         else:
             self.reduce_atom_representations = False
-            
+        
         assert self.atom_message_model.num_interactions >= self.probe_message_model.num_interactions
         
         # Compatibility for specific models
@@ -215,5 +215,9 @@ class ChargeModel(torch.nn.Module):
             }
         else:
             new_dict = checkpoint["state_dict"]
-            
+        
+        # HACK TO LOAD OLD SCHNET CHECKPOINTS
+        if 'atomic_mass' in new_dict:
+            del new_dict['atomic_mass']
+        
         load_state_dict(model, new_dict, strict=False)
