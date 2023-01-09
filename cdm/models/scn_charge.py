@@ -13,6 +13,8 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import radius_graph
 
+from torch_geometric.utils import sort_edge_index
+
 from ocpmodels.models.scn.scn import SphericalChannelNetwork as SCN
 
 from ocpmodels.common.registry import registry
@@ -82,6 +84,12 @@ class SCN_Charge(SCN):
         self.probe = kwargs['probe']
         kwargs.pop('atomic')
         kwargs.pop('probe')
+        
+        if 'max_num_neighbors' not in kwargs:
+            kwargs['max_num_neighbors'] = 10000
+            print('ping')
+        if 'show_timing_info' not in kwargs:
+            kwargs['show_timing_info'] = False
                  
         super().__init__(
             num_atoms = 1,
@@ -98,7 +106,10 @@ class SCN_Charge(SCN):
         
         num_atoms = len(atomic_numbers)
         pos = data.pos
-
+        
+        # Necessary for _rank_edge_distances
+        data.edge_index = sort_edge_index(data.edge_index.flipud()).flipud()
+        
         (
             edge_index,
             edge_distance,
