@@ -8,7 +8,7 @@ from tqdm import tqdm
 import warnings
 
 from torch_geometric.data import Batch
-from torch_geometric.utils import remove_isolated_nodes, sort_edge_index
+from torch_geometric.utils import remove_isolated_nodes
 
 from ocpmodels.datasets import data_list_collater
 from ocpmodels.common.registry import registry
@@ -130,8 +130,6 @@ class ChargeModel(torch.nn.Module):
     
     @conditional_grad(torch.enable_grad())
     def forward_atomic(self, data):
-        data.edge_index = sort_edge_index(data.edge_index.flipud()).flipud()
-        
         if self.freeze_atomic:
             with torch.no_grad():
                 atom_representations = self.atom_message_model(data)
@@ -146,8 +144,6 @@ class ChargeModel(torch.nn.Module):
     @conditional_grad(torch.enable_grad())        
     def forward_probe(self, data, atom_representations):
         data.atom_representations = atom_representations[-self.probe_message_model.num_interactions:]
-        
-        data.edge_index = sort_edge_index(data.edge_index.flipud()).flipud()
         
         probe_results = self.probe_message_model(data)
         
