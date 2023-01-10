@@ -81,7 +81,7 @@ class ProbeGraphAdder():
             stride = self.stride
         
         probe_data = Data()
-        density = torch.tensor(data_object.charge_density)
+        density = torch.tensor(np.array(data_object.charge_density))
 
         if stride != 1:
             assert (stride == 2) or (stride == 4)
@@ -185,7 +185,7 @@ class ProbeGraphAdder():
         probe_data.natoms = torch.LongTensor([int(len(atomic_numbers))])
         probe_data.pos = torch.cat((data_object.pos, probe_pos))
 
-        probe_data.target = torch.tensor(density.reshape(density.shape[-3:])[probe_choice[0:3]], device = probe_pos.device)
+        probe_data.target = (density.reshape(density.shape[-3:])[probe_choice[0:3]]).to(atomic_numbers.device)
         
         probe_data.edge_index = probe_edges.long()
         
