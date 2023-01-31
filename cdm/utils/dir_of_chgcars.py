@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+
 from pathlib import Path
 
 from torch.utils.data import Dataset
@@ -22,24 +24,22 @@ class ChgcarDataset(Dataset):
        ├─ CHGCAR
        ├─ ...
     ├─ ...
-    
-    config['cutoff'] must be set explicitly.
    
     '''
     
-    def __init__(self, config, transform = None):
+    def __init__(self, config):
         super(ChgcarDataset, self).__init__()
         self.config = config
-        self.transform = transform
         
         self.path = Path(self.config['src'])
         if self.path.is_file():
             raise Exception('The specified src is not a directory')
             
-        self.paths = sorted(self.path.glob('*/CHGCAR'))
+        self.id = sorted(self.path.glob('*/CHGCAR'))
+        
         self.a2g = AtomsToGraphs(
             max_neigh = 1000,
-            radius = self.config['cutoff'],
+            radius = 8,
             r_energy = False,
             r_forces = False,
             r_distances = False,
@@ -47,13 +47,18 @@ class ChgcarDataset(Dataset):
             r_pbc = False,
         )
         
+        self.transform = config.get('transform')
+        
     def __len__(self):
-        return len(self.paths)
+        return len(self.id)
     
     def __getitem__(self, idx):
-        vcd = VaspChargeDensity(self.paths[idx])
-        atoms = vcd.atoms[-1]
-        dens = vcd.chg[-1]
+        try:
+            vcd = VaspChargeDensity(self.id[idx])
+            atoms = vcd.atoms[-1]
+            dens = vcd.chg[-1]
+        except:
+            print('Exception occured for: ', self.id[idx])
         
         data_object = self.a2g.convert(atoms)
         data_object.charge_density = dens

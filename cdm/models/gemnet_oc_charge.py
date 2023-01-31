@@ -85,12 +85,14 @@ class GemNet_OC_charge(GemNetOC):
         
         if self.probe:
             kwargs['num_elements'] = 84
+            
+        kwargs['otf_graph'] = False
                  
         super().__init__(
             num_atoms = 1,
             bond_feat_dim = 1,
             num_targets = 1,
-            num_spherical = 16,
+            num_spherical = num_spherical,
             num_radial = num_radial,
             num_blocks = num_blocks,
             emb_size_atom = emb_size_atom,
@@ -109,7 +111,6 @@ class GemNet_OC_charge(GemNetOC):
             num_concat = num_concat,
             num_atom = num_atom,
             num_output_afteratom = num_output_afteratom,
-            otf_graph = False,
             **kwargs,
         )
         
@@ -130,6 +131,7 @@ class GemNet_OC_charge(GemNetOC):
             pos.requires_grad_(True)
 
         data.natoms = data.natoms.to(data.pos.device)
+        data.tags = torch.ones_like(data.atomic_numbers)
         data.neighbors = data.neighbors.to(data.pos.device)
             
         (
@@ -210,6 +212,7 @@ class GemNet_OC_charge(GemNetOC):
             
             for i in range(self.num_blocks):
                 h[atom_indices] = data.atom_representations[i]
+                
                 # Interaction block
                 h, m = self.int_blocks[i](
                 h=h,

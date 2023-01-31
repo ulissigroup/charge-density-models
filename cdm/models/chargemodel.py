@@ -117,10 +117,9 @@ class ChargeModel(torch.nn.Module):
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
         # Ensure data has probe points
-        if not hasattr(data, 'probe_data'):
-            data = self.otf_pga(data)
-            data.probe_data = [pyg2_data_transform(data.probe_data)]
-            data.probe_data = Batch.from_data_list(data.probe_data)
+        data = self.otf_pga(data)
+        data.probe_data = [pyg2_data_transform(data.probe_data)]
+        data.probe_data = Batch.from_data_list(data.probe_data)
         
         atom_representations = self.forward_atomic(data)
 
@@ -156,7 +155,11 @@ class ChargeModel(torch.nn.Module):
             is_probe = data.atomic_numbers == 0
             _, _, is_not_isolated = remove_isolated_nodes(data.edge_index, num_nodes = len(data.atomic_numbers))
             is_isolated = ~is_not_isolated
-            probe_results[is_isolated[is_probe]] = torch.zeros_like(probe_results[is_isolated[is_probe]])
+            
+            if torch.all(is_isolated):
+                warnings.warn('All probes are isolated - not enforcing zero charge constraint')
+            else:
+                probe_results[is_isolated[is_probe]] = torch.zeros_like(probe_results[is_isolated[is_probe]])
 
         if self.enforce_charge_conservation: 
             if torch.sum(probe_results) == 0:
