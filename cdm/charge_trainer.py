@@ -85,11 +85,8 @@ class ChargeTrainer(BaseTrainer):
         slurm={},
         noddp=False,
         name=None,
-        probe_graph_config = {'implementation': 'SKIP'},
         trainer = 'charge',
     ):
-        
-        self.pga = ProbeGraphAdder(**probe_graph_config)
         
         super().__init__(
             task=task,
@@ -117,13 +114,14 @@ class ChargeTrainer(BaseTrainer):
         self.name = 'charge'
     
     def load_loss(self):
+        
         self.loss_fn = {}
         self.loss_fn['charge'] = self.config['optim'].get('loss_charge', 'mae')
         
         for loss, loss_name in self.loss_fn.items():
             if loss_name in ['l1', 'mae']:
                 self.loss_fn[loss] = torch.nn.L1Loss()
-            elif loss_name == 'mse':
+            elif loss_name in ['l2', 'mse']:
                 self.loss_fn[loss] = torch.nn.MSELoss()
             elif loss_name == 'l2mae':
                 self.loss_fn[loss] = L2MAELoss()
@@ -135,7 +133,8 @@ class ChargeTrainer(BaseTrainer):
                 raise NotImplementedError(
                     f'Unknown loss function name: {loss_name}'
                 )
-            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss], reduction='sum')
+            
+            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss], reduction='mean')
         
 
     def load_task(self):
@@ -507,7 +506,7 @@ class ChargeTrainer(BaseTrainer):
         if self.config.get('dataset', None):
             self.train_dataset = registry.get_dataset_class(
                 self.config['task']['dataset']
-            )(self.config['dataset'], transform = self.pga)
+            )(self.config['dataset'])
             self.train_sampler = self.get_sampler(
                 self.train_dataset,
                 self.config['optim']['batch_size'],
@@ -521,7 +520,7 @@ class ChargeTrainer(BaseTrainer):
             if self.config.get('val_dataset', None):
                 self.val_dataset = registry.get_dataset_class(
                     self.config['task']['dataset']
-                )(self.config['val_dataset'], transform = self.pga)
+                )(self.config['val_dataset'])
                 self.val_sampler = self.get_sampler(
                     self.val_dataset,
                     self.config['optim'].get(
@@ -537,7 +536,7 @@ class ChargeTrainer(BaseTrainer):
             if self.config.get('test_dataset', None):
                 self.test_dataset = registry.get_dataset_class(
                     self.config['task']['dataset']
-                )(self.config['test_dataset'], transform = self.pga)
+                )(self.config['test_dataset'])
                 self.test_sampler = self.get_sampler(
                     self.test_dataset,
                     self.config['optim'].get(
@@ -609,7 +608,6 @@ class NormedMAELoss(torch.nn.Module):
         prediction,
         target,
     ):
-        
         return torch.sum(torch.abs(prediction - target)) \
              / torch.sum(torch.abs(target))
     
