@@ -1,9 +1,85 @@
 from ase.calculators.vasp import VaspChargeDensity
 
 class VaspChargeDensity(VaspChargeDensity):
-    def read(self, filename):
-        super().read(filename)
+    def read(self, filename, read_augs = True):
+        """Re-implemenation of ASE functionality
+        The adjustments support the new, faster _read_chg
+
+        """
+        import ase.io.vasp as aiv
+        fd = open(filename)
+        self.atoms = []
+        self.chg = []
+        self.chgdiff = []
+        self.aug = ''
+        self.augdiff = ''
+        while True:
+            try:
+                atoms = aiv.read_vasp(fd)
+            except (IOError, ValueError, IndexError):
+                # Probably an empty line, or we tried to read the
+                # augmentation occupancies in CHGCAR
+                break
+            fd.readline()
+            ngr = fd.readline().split()
+            shape = (int(ngr[0]), int(ngr[1]), int(ngr[2]))
+            chg = self._read_chg(fd, shape, atoms.get_volume())
+            self.chg.append(chg)
+            self.atoms.append(atoms)
+            # Check if the file has a spin-polarized charge density part, and
+            # if so, read it in.
+            fl = fd.tell()
+
+            if not read_augs:
+                break
+
+            # First check if the file has an augmentation charge part (CHGCAR
+            # file.)
+            line1 = fd.readline()
+            if line1 == '':
+                break
+            elif line1.find('augmentation') != -1:
+                augs = [line1]
+                while True:
+                    line2 = fd.readline()
+                    if line2.split() == ngr:
+                        self.aug = ''.join(augs)
+                        augs = []
+                        chgdiff = np.empty(ng)
+                        self._read_chg(fd, chgdiff, atoms.get_volume())
+                        self.chgdiff.append(chgdiff)
+                    elif line2 == '':
+                        break
+                    else:
+                        augs.append(line2)
+                if len(self.aug) == 0:
+                    self.aug = ''.join(augs)
+                    augs = []
+                else:
+                    self.augdiff = ''.join(augs)
+                    augs = []
+            elif line1.split() == ngr:
+                chgdiff = np.empty(ng)
+                self._read_chg(fd, chgdiff, atoms.get_volume())
+                self.chgdiff.append(chgdiff)
+            else:
+                fd.seek(fl)
+        fd.close()
         self.aug_string_to_dict()
+        
+    def _read_chg(self, fobj, shape, volume):
+        """Replaces ASE's method
+        This implementation is approximately 2x faster.
+        This is important because reading data from disk can
+        be a limiting factor for training speed.
+        
+        """
+        chg = np.fromfile(fobj, count = np.prod(shape), sep=' ')
+
+        chg = chg.reshape(shape, order = 'F')
+        chg /= volume
+
+        return chg
         
     def write(self, filename):
         self.aug_dict_to_string
