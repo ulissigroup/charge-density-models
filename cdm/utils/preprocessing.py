@@ -1,4 +1,5 @@
 from ase.calculators.vasp import VaspChargeDensity
+import numpy as np
 
 class VaspChargeDensity(VaspChargeDensity):
     def read(self, filename, read_augs = True):
