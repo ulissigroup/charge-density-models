@@ -7,6 +7,9 @@ import torch
 import torch_geometric
 from tqdm import tqdm
 
+from torch.utils.data import DataLoader
+from torch_geometric.data import Batch
+
 from ocpmodels.common import distutils
 from ocpmodels.common.registry import registry
 from ocpmodels.modules.normalizer import Normalizer
@@ -24,7 +27,6 @@ from ocpmodels.modules.evaluator import *
 
 from cdm.utils.probe_graph import ProbeGraphAdder
 from cdm import models
-from torch_geometric.data import Batch
 
 
 @registry.register_trainer("charge")
@@ -134,7 +136,7 @@ class ChargeTrainer(BaseTrainer):
                     f'Unknown loss function name: {loss_name}'
                 )
             
-            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss], reduction='mean')
+            self.loss_fn[loss] = DDPLoss(self.loss_fn[loss], reduction='sum')
         
 
     def load_task(self):
@@ -566,6 +568,17 @@ class ChargeTrainer(BaseTrainer):
                     ],
                     device=self.device,
                 )
+                
+    def get_dataloader(self, dataset, sampler):
+            loader = DataLoader(
+                dataset,
+                collate_fn=self.parallel_collater,
+                num_workers=self.config["optim"]["num_workers"],
+                pin_memory=True,
+                batch_sampler=sampler,
+                prefetch_factor = 6,
+            )
+            return loader
 
 
 class ChargeEvaluator(Evaluator):
