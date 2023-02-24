@@ -79,6 +79,7 @@ class ChargeTrainer(BaseTrainer):
         is_debug=False,
         is_hpo=False,
         print_every=100,
+        log_every=100,
         seed=None,
         logger="wandb",
         local_rank=0,
@@ -114,6 +115,7 @@ class ChargeTrainer(BaseTrainer):
     
         self.evaluator = ChargeEvaluator()
         self.name = 'charge'
+        self.log_every = log_every
     
     def load_loss(self):
         
@@ -264,31 +266,32 @@ class ChargeTrainer(BaseTrainer):
                 )
 
                 # Log metrics.
-                log_dict = {k: self.metrics[k]['metric'] for k in self.metrics}
-                log_dict.update(
-                    {
-                        'lr': self.scheduler.get_lr(),
-                        'epoch': self.epoch,
-                        'step': self.step,
-                    }
-                )
-                if (
-                    self.step % self.config['cmd']['print_every'] == 0
-                    and distutils.is_master()
-                    and not self.is_hpo
-                ):
-                    log_str = [
-                        '{}: {:.2e}'.format(k, v) for k, v in log_dict.items()
-                    ]
-                    print(', '.join(log_str))
-                    self.metrics = {}
-
-                if self.logger is not None:
-                    self.logger.log(
-                        log_dict,
-                        step=self.step,
-                        split='train',
+                if (self.step % self.log_every == 0) or (self.step % self.config['cmd']['print_every'] == 0):
+                    log_dict = {k: self.metrics[k]['metric'] for k in self.metrics}
+                    log_dict.update(
+                        {
+                            'lr': self.scheduler.get_lr(),
+                            'epoch': self.epoch,
+                            'step': self.step,
+                        }
                     )
+                    if (
+                        self.step % self.config['cmd']['print_every'] == 0
+                        and distutils.is_master()
+                        and not self.is_hpo
+                    ):
+                        log_str = [
+                            '{}: {:.2e}'.format(k, v) for k, v in log_dict.items()
+                        ]
+                        print(', '.join(log_str))
+                        self.metrics = {}
+
+                    if self.logger is not None:
+                        self.logger.log(
+                            log_dict,
+                            step=self.step,
+                            split='train',
+                        )
 
                 # Evaluate on val set after every `eval_every` iterations.
                 if self.step % eval_every == 0:
