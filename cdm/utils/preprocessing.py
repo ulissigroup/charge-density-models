@@ -1,5 +1,6 @@
 from ase.calculators.vasp import VaspChargeDensity
 import numpy as np
+import re
 
 class VaspChargeDensity(VaspChargeDensity):
     def read(self, filename, read_augs = True):
@@ -83,7 +84,7 @@ class VaspChargeDensity(VaspChargeDensity):
         return chg
         
     def write(self, filename):
-        self.aug_dict_to_string
+        self.aug_dict_to_string()
         super().write(filename)
         
     def aug_dict_to_string(self):
