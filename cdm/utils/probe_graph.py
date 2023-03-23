@@ -48,7 +48,9 @@ class ProbeGraphAdder():
         density,
         cell
     ):
-        density = torch.tensor(np.array(density), dtype = torch.float)
+        
+        if not torch.is_tensor(density):
+            density = torch.tensor(np.array(density), dtype = torch.float)
 
         if self.stride != 1:
             assert (self.stride == 2) or (self.stride == 4)
