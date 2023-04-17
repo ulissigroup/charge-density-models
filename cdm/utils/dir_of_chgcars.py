@@ -34,8 +34,15 @@ class ChgcarDataset(Dataset):
         self.path = Path(self.config['src'])
         if self.path.is_file():
             raise Exception('The specified src is not a directory')
-            
-        self.id = sorted(self.path.glob('*/CHGCAR'))
+        split = config.get('split')
+        if split is not None:
+            f = open(split, "r")
+            split = f.readlines()
+            self.id = sorted([Path(
+                str(self.path) + '/' +
+                str(i.rstrip('\n')) + '/CHGCAR' ) for i in split])
+        else:
+            self.id = sorted(self.path.glob('*/CHGCAR'))
         
         self.a2g = AtomsToGraphs(
             max_neigh = 1000,
