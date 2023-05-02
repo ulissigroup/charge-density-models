@@ -250,7 +250,8 @@ class ChargeTrainer(BaseTrainer):
                     loss = self._compute_loss(out, batch)
                 loss = self.scaler.scale(loss) if self.scaler else loss
                 
-                self._backward(loss)
+                if torch.sum(out['charge']) != 0:
+                    self._backward(loss)
                 
                 scale = self.scaler.get_scale() if self.scaler else 1.0
 
