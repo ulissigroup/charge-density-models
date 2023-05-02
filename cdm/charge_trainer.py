@@ -261,9 +261,6 @@ class ChargeTrainer(BaseTrainer):
                     self.evaluator,
                     metrics={},
                 )
-                self.metrics = self.evaluator.update(
-                    'loss', loss.item() / scale, self.metrics
-                )
 
                 # Log metrics.
                 if (self.step % self.log_every == 0) or (self.step % self.config['cmd']['print_every'] == 0):
