@@ -1,0 +1,7 @@
+trainer: cdm.charge_trainer.ChargeTrainer
+local_rank: 0
+amp: True
+seed: 2
+
+task:
+    description: Predicting electron density from atomic positions

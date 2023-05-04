@@ -1,0 +1,5 @@
+includes:
+- /home/jovyan/charge-density-models/configs/common/common.yml
+- /home/jovyan/charge-density-models/configs/datasets/3k.yml
+- /home/jovyan/charge-density-models/configs/models/schnet/schnet_large.yml
+- /home/jovyan/charge-density-models/configs/optimizers/adam-standard/schnet_large.yml

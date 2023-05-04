@@ -1,0 +1,23 @@
+model:
+    name: charge_model
+    enforce_zero_for_disconnected_probes: False
+    enforce_charge_conservation: True
+    freeze_atomic: False
+    
+    atom_model_config:
+        name: schnet_charge
+        num_interactions: 5
+        hidden_channels: 128
+        num_filters: 32
+        cutoff: 5
+        
+    probe_model_config:
+        name: schnet_charge
+        num_interactions: 3
+        hidden_channels: 128
+        num_filters: 32
+        cutoff: 5
+        
+    otf_pga_config:
+        num_probes: 20000
+        cutoff: 5

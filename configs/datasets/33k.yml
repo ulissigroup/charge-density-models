@@ -1,0 +1,6 @@
+task:
+    dataset: dir_of_chgcars
+
+dataset:
+  - src: /home/jovyan/shared-scratch/ethan/density/33k_sample/
+  - src: /home/jovyan/shared-scratch/ethan/val_dataset_gen/val_ood_both/val
