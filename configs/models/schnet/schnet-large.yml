@@ -17,5 +17,6 @@ model:
         cutoff: 6
         
     otf_pga_config:
-        num_probes: 50000
+        num_probes: 60000
         cutoff: 6
+        assert_min_edges: 10

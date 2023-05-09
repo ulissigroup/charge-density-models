@@ -1,7 +1,7 @@
 optim:
     optimizer: Adam
     num_workers: 6
-    lr_initial: 0.0001
+    lr_initial: 0.00001
     scheduler: ReduceLROnPlateau
     mode: min
     factor: 0.97
