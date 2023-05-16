@@ -33,6 +33,9 @@ class schnet_charge(SchNet):
             otf_graph = False,
             **kwargs,
         )
+        
+        del self.lin1
+        del self.lin2
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):

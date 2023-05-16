@@ -8,3 +8,4 @@ optim:
     patience: 1
     max_epochs: 1000
     loss_charge: normed_mae
+    load_balancing: False
