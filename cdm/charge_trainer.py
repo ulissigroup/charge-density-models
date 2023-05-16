@@ -8,6 +8,8 @@ import torch_geometric
 from tqdm import tqdm
 
 from torch.utils.data import DataLoader
+from torch.nn.parallel.distributed import DistributedDataParallel
+
 from torch_geometric.data import Batch
 
 from ocpmodels.common import distutils
