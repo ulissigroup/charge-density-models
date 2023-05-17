@@ -118,6 +118,7 @@ class ChargeTrainer(BaseTrainer):
         self.evaluator = ChargeEvaluator()
         self.name = 'charge'
         self.log_every = log_every
+        self.num_devices = self.config['gpus'] if (self.config['gpus'] > 0) else 1
     
     def load_loss(self):
         
@@ -234,7 +235,7 @@ class ChargeTrainer(BaseTrainer):
             for i in range(skip_steps, len(self.train_loader)):
                 
                 self.epoch = epoch_int + (i + 1) / len(self.train_loader)
-                self.step = epoch_int * len(self.train_loader) + i + 1
+                self.step = (epoch_int * len(self.train_loader) + i + 1) * self.num_devices
                 self.model.train()
 
                 # Get a batch.
