@@ -40,6 +40,9 @@ class PaiNN_Charge(PaiNN):
         
         self.num_interactions = self.num_layers
         
+        del self.out_energy
+        del self.out_forces
+        
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
         data.pos = data.pos.float()

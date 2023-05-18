@@ -5,3 +5,4 @@ seed: 2
 
 task:
     description: Predicting electron density from atomic positions
+    strict_load: False
