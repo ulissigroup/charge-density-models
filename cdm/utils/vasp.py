@@ -1,11 +1,12 @@
 import os
 import yaml
 import re
+import torch
 
 import ase
 from ase.calculators.vasp import Vasp
 
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 
 from cdm.utils.inference import inference
 from cdm.utils.preprocessing import VaspChargeDensity
@@ -17,10 +18,10 @@ def write_CHGCAR_like(
     batch_size = 100000,
     use_tqdm = False,
     device = 'cuda',
-):
+):      
     vcd = VaspChargeDensity(input_CHGCAR_path)
     vcd.chg[0] = inference(
-        atoms = vcd.atoms,
+        atoms = vcd.atoms[0],
         model = model,
         grid = vcd.chg[0].shape,
         atom_cutoff = model.atom_message_model.cutoff,
@@ -62,20 +63,22 @@ def setup_VASP_experiment(
                 output_CHGCAR_path = os.path.join(output_path, i, 'CHGCAR'),
                 batch_size = batch_size,
                 device = device,
+                use_tqdm = True,
             )
     else:
             assert set(paths) == set(os.listdir(input_density_path))
             
             for i in tqdm(paths):
+                
                 vcd = VaspChargeDensity(os.path.join(input_density_path, i, 'CHGCAR'))
                 vcd.chg[0] = inference(
-                    atoms = vcd.atoms,
+                    atoms = vcd.atoms[0],
                     model = model,
                     grid = vcd.chg[0].shape,
                     atom_cutoff = model.atom_message_model.cutoff,
                     probe_cutoff = modle.probe_message_model.cutoff,
                     batch_size = batch_size,
-                    use_tqdm = use_tqdm,
+                    use_tqdm = False,
                     device = device,
                     total_density = torch.sum(torch.tensor(vcd.chg[0])),
                 )
@@ -87,8 +90,11 @@ def kubernetes_VASP_batch(
     base_params,
     exp_tag,
     namespace,
-    cpu_cores = 4,
-    memory = '8Gi',
+    cpu_req = 4,
+    cpu_lim = 16,
+    mem_req = '8Gi',
+    mem_lim = '16Gi',
+    VASP_mp_threads = 16,
     select_only = None,
 ):
     '''
@@ -97,13 +103,20 @@ def kubernetes_VASP_batch(
         base_params: a yaml of parameters obtained from your template file
                      or a path to the template file
         exp_tag: a string to identify this experiment/run/batch
-        cpu_cores: how many CPU cores for each individual VASP job
-        memory: how much memory for each individual VASP job
+        cpu_req: how many CPU cores to request for each individual VASP job
+        cpu_lim: how many CPU cores to limit the job to (if extra cores are available on the node)
+        mem_req: how much memory to reserve for each individual VASP job
+        mem_lim: how much memory to limit the job to (if extra memory is avaialable on the node)
+        VASP_mp_threads: how many threads to launch for your VASP calculation.
+                    Should be between (or equal to) cpu_req and cpu_lim
         
     This script is designed to help submit calculations to Laikapack, a
     Kubernetes cluster at CMU. It is likely that your HPC setup is
     different. In that case, you should use whatever submission system is 
     recommended for VASP calculations on your resources.
+    
+    If None is passed in for any of the resource values, this script will not attempt to replace that
+    value in the template file. In this case, your template file should specify the resource amount.
         
     '''
     
@@ -122,14 +135,17 @@ def kubernetes_VASP_batch(
     container = params['spec']['template']['spec']['containers'][0]
     
     # Set the resource usage, which is assumed to be the same for all jobs
-    if cpu_cores is not None:
-        container['resources']['limits']['cpu'] = cpu_cores
-        container['resources']['requests']['cpu'] = cpu_cores
-        container['args'][0] = re.sub('-np \d+', '-np '+str(cpu_cores), container['args'][0])
+    if cpu_lim is not None:
+        container['resources']['limits']['cpu'] = cpu_lim
+    if cpu_req is not None:
+        container['resources']['requests']['cpu'] = cpu_req
+    if VASP_mp_threads is not None:
+        container['args'][0] = re.sub('-np \d+', '-np '+str(VASP_mp_threads), container['args'][0])
     
-    if memory is not None:
-        container['resources']['limits']['memory'] = memory
-        container['resources']['requests']['memory'] = memory
+    if mem_lim is not None:
+        container['resources']['limits']['memory'] = mem_lim
+    if mem_req is not None:
+        container['resources']['requests']['memory'] = mem_req
     
     for fid, directory in enumerate(tqdm(paths)):
         # Set the metadata for each job
@@ -165,19 +181,22 @@ def read_experiment(
             
             try:
                 with open(path + '/' + directory + '/' + 'vasp.out') as vaspout:
-
+                    
+                    ncg = 0
                     DAVS = [line for line in vaspout if ('DAV' in line)]
                     for idx, line in enumerate(DAVS):
                         line = line.split(' ')
                         line = [string for string in line if (string != '')]
                         DAVS[idx] = line
+                        ncg += int(line[5])
 
                     n = len(DAVS)
                     E = float(DAVS[-1][2])
 
-                    results[directory] = {'num_scf_steps':n, 'Energy': E}
-            except:
+                    results[directory] = {'num_scf_steps': n, 'Energy': E, 'ncg': ncg}
+            except Exception as exception:
                 print(f'Error: could not read vasp.out from: {path}/{directory}')
+                print(str(exception))
             
     return results
 
@@ -191,9 +210,21 @@ def compare_VASP_experiments(
     
     assert set(baseline.keys()) == set(trial.keys())
     
-    savings = []
     E_diffs = []
     for i in baseline.keys():
-        savings.append(trial[i]['num_scf_steps'] / baseline[i]['num_scf_steps'])
         E_diffs.append(trial[i]['Energy'] - baseline[i]['Energy'])
-    return savings, E_diffs
+        ncg_fraction = sum(x['ncg'] for x in trial.values()) / sum(x['ncg'] for x in baseline.values())
+        indiv_ncg_fractions = [x['ncg'] / y['ncg'] for x, y in zip(trial.values(), baseline.values())]
+        
+        faster_fraction = len([x for x in trial.keys() if trial[x]['ncg'] < baseline[x]['ncg']]) / len(trial.keys())
+        slower_fraction = len([x for x in trial.keys() if trial[x]['ncg'] > baseline[x]['ncg']]) / len(trial.keys())
+        equal_fraction = len([x for x in trial.keys() if trial[x]['ncg'] == baseline[x]['ncg']]) / len(trial.keys())
+        
+    return {
+        'faster_fraction': faster_fraction,
+        'slower_fraction': slower_fraction,
+        'equal_fraction': equal_fraction,
+        'ncg_fraction': ncg_fraction,
+        'E_diffs': E_diffs,
+        'indiv_ncg_fractions': indiv_ncg_fractions,
+    }

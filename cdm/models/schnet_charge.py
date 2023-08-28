@@ -34,9 +34,11 @@ class schnet_charge(SchNet):
             **kwargs,
         )
         
-        del self.lin1
-        del self.lin2
-
+        if hasattr(self, 'lin1'):
+            del self.lin1
+        if hasattr(self, 'lin2'):
+            del self.lin2
+            
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
         z = data.atomic_numbers.long()

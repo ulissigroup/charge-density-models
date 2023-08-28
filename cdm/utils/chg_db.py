@@ -1,10 +1,11 @@
 import numpy as np
 import torch
-from pathlib import Path
 import ase
 import bisect
+import warnings
 
 from tqdm.notebook import tqdm
+from pathlib import Path
 from multiprocessing import Pool
 
 from ocpmodels.common.registry import registry
@@ -15,6 +16,9 @@ from cdm.utils.preprocessing import VaspChargeDensity
 @registry.register_dataset('charge_db')
 class ChgDBDataset(AseDBDataset):
     '''
+    An alternative database format based on ASE databases
+    One way to create such a database is with the "write_charge_db"
+    script in this file. This script requires VASP CHGCARs.
     '''
     def __getitem__(self, idx):
         # Handle slicing
@@ -40,6 +44,9 @@ class ChgDBDataset(AseDBDataset):
 
         data_object.pbc = torch.tensor(atoms.pbc)
         data_object.charge_density = atoms.info["charge_density"]
+        
+        if isinstance(data_object.charge_density, list):
+            data_object.charge_density = torch.tensor(data_object.charge_density)
 
         # Transform data object
         if self.transform is not None:
@@ -66,11 +73,7 @@ class ChgDBDataset(AseDBDataset):
             atoms.info.update(atoms_row.data)
 
         return atoms
-    
-def path_to_list(path):
-    path = Path(path)
-    return sorted(path.glob("*/CHGCAR"))
-    
+
 def write_charge_db(
     CHGCARs,
     ase_db,
@@ -82,29 +85,16 @@ def write_charge_db(
     else:
         ids = CHGCARs
     
-    
-    if num_workers == 1:
-        for idx in tqdm(ids):
-            try:
-                vcd = VaspChargeDensity(idx)
-                atoms = vcd.atoms[-1]
-                dens = vcd.chg[-1]
-            except:
-                print("Exception occured for: ", idx)
+    for idx in tqdm(ids):
+        try:
+            vcd = VaspChargeDensity(idx)
+            atoms = vcd.atoms[-1]
+            dens = vcd.chg[-1]
+        except:
+            print("Exception occured for: ", idx)
 
-            ase_db.write(atoms, data = {'charge_density':dens})
-            
-    else:
-        batch_size = int(len(ids) / num_workers)
-        split_ids = []
-        for i in range(num_workers-1):
-            split_ids.append(ids[i*batch_size: (i+1) * batch_size])
-            
-        split_ids.append(ids[(num_workers-1)*batch_size:])
-        iterable = zip(split_ids, [ase_db] * num_workers)
-        
-        with Pool(processes = num_workers) as pool:
-            out = pool.starmap(
-                func = write_charge_db, 
-                iterable = iterable,
-            )
+        try:
+            ase_db.write(atoms, data = {'charge_density': dens})
+        except TypeError:
+            warnings.warn("Failed to write tensor to database. Trying again as a list!")
+            ase_db.write(atoms, data = {'charge_density': dens.tolist()})

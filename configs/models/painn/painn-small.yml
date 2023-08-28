@@ -1,0 +1,25 @@
+model:
+    name: charge_model
+    enforce_zero_for_disconnected_probes: True
+    enforce_charge_conservation: True
+    freeze_atomic: False
+    
+    atom_model_config:
+        name: painn_charge
+        num_layers: 3
+        hidden_channels: 128
+        num_rbf: 32
+        cutoff: 6
+        
+    probe_model_config:
+        name: painn_charge
+        num_layers: 2
+        hidden_channels: 128
+        max_neighbors: 20000
+        num_rbf: 32
+        cutoff: 6
+        
+    otf_pga_config:
+        num_probes: 30000
+        cutoff: 6
+        assert_min_edges: 200
