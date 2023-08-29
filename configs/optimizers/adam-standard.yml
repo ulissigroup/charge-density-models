@@ -9,4 +9,4 @@ optim:
     max_epochs: 1000
     loss_charge: normed_mae
     load_balancing: False
-    eval_every: 100000
+    eval_every: 40000
