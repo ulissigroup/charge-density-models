@@ -5,11 +5,48 @@ import torch
 
 import ase
 from ase.calculators.vasp import Vasp
+from ase.db import connect
 
 from tqdm.notebook import tqdm
 
 from cdm.utils.inference import inference
 from cdm.utils.preprocessing import VaspChargeDensity
+
+def make_VASP_inputs(
+    database_path,
+    path):
+    """
+    Make VASP inputs for all entries in a database.
+    This script relies on a working ASE setup (i.e. the appropriate psuedopotentials are available).
+    Once the directories are created you can run the VASP calculations according to your HPC system.
+
+    Args:
+        database_path (str): Path to database.
+        path (str): Path to directory where vasp inputs will be written.
+
+    Returns:
+        None
+    """
+    database = connect(database_path)
+
+    for entry in database.select():
+        atoms = entry.toatoms()
+
+        # Setup vasp calculator
+        atoms.calc = Vasp(
+            encut=350,
+            xc='rpbe',
+            gga='RP',
+            lcharg=True,
+            lwave=False,
+            nelm=120,
+            algo='Normal',
+        )
+
+        atoms.calc.directory = os.path.join(path, str(entry.id))
+
+        # Write vasp inputs
+        atoms.calc.write_input(atoms)
 
 def write_CHGCAR_like(
     model,
